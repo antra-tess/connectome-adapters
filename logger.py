@@ -16,11 +16,11 @@ def setup_logging():
     """Set up logging based on configuration"""
     config = Config.get_instance()
 
-    log_level = LOG_LEVELS.get(config.get_setting("logging_level").upper(), logging.INFO)
-    log_format = config.get_setting("log_format")
-    log_file_path = config.get_setting("log_file_path")
-    max_log_size = config.get_setting("max_log_size")
-    backup_count = config.get_setting("backup_count")
+    log_level = LOG_LEVELS.get(config.get_setting("logging", "logging_level").upper(), logging.INFO)
+    log_format = config.get_setting("logging", "log_format")
+    log_file_path = config.get_setting("logging", "log_file_path")
+    max_log_size = config.get_setting("logging", "max_log_size")
+    backup_count = config.get_setting("logging", "backup_count")
 
     formatter = logging.Formatter(log_format)
 

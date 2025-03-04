@@ -16,74 +16,78 @@ class Config:
         return cls._instance
 
     def initialize(self, config_path: str):
-        """Initialize the singleton instance"""
+        """Initialize the singleton instance
+
+        Args:
+            config_path: Path to the configuration file
+        """
+        self.categories = [
+            "attachments",
+            "caching",
+            "logging",
+            "rate_limit",
+            "socketio",
+            "adapter"
+        ]
+        for category in self.categories:
+            setattr(self, category, {})
+
         self.config_path = config_path
-        self.token = None
-        self.settings = {}
         self.load_config()
 
     def load_config(self) -> bool:
-        """Load configuration from YAML file"""
+        """Load configuration from YAML file
+
+        Returns:
+            bool: True if configuration was loaded successfully, False otherwise
+        """
         try:
             if os.path.exists(self.config_path):
-                with open(self.config_path, 'r') as file:
+                with open(self.config_path, "r") as file:
                     config = yaml.safe_load(file) or {}
-                    self.token = config.get("token")
-
-                    if "settings" in config and isinstance(config["settings"], dict):
-                        self.settings = config["settings"]
-
-                if not self.token:
-                    logger.error("Token not found in config file")
-                    return
-
+                    for category in self.categories:
+                        if category in config and isinstance(config[category], dict):
+                            setattr(self, category, config[category])
                 logger.info("Loaded configuration")
             else:
                 logger.error("Config file not found")
         except Exception as e:
             logger.error(f"Error loading config: {str(e)}")
 
-    def get_token(self) -> str:
-        """Get the bot token"""
-        if not self.token:
-            raise ValueError("Bot token not available in configuration")
-        return self.token
+    def get_setting(self, category: str, key: str, default=None):
+        """Get a specific setting with support for nested keys (e.g., "test.foo")
 
-    def get_setting(self, key: str, default=None):
-        """Get a specific setting with support for nested keys (e.g., 'privacy.retention_days')"""
+        Args:
+            category: Configuration category
+            key: Setting key
+            default: Default value if key not found
+        """
         try:
-            if '.' in key:
-                parts = key.split('.')
-                current = self.settings
-                for part in parts:
-                    if not isinstance(current, dict) or part not in current:
-                        return default
-                    current = current[part]
-                return current
-            return self.settings.get(key, default)
+            return getattr(self, category).get(key, default)
         except (KeyError, AttributeError):
             if default is not None:
                 return default
             raise ValueError(f"Setting '{key}' not found in configuration")
 
-    def has_setting(self, key: str) -> bool:
-        """Check if a setting exists, with support for nested keys"""
+    def has_setting(self, category: str, key: str) -> bool:
+        """Check if a setting exists, with support for nested keys
+
+        Args:
+            category: Configuration category
+            key: Setting key
+        """
         try:
-            if '.' in key:
-                parts = key.split('.')
-                current = self.settings
-                for part in parts:
-                    if not isinstance(current, dict) or part not in current:
-                        return False
-                    current = current[part]
-                return True
-            return key in self.settings
+            return key in getattr(self, category)
         except (KeyError, AttributeError):
             return False
 
     @classmethod
-    def get_instance(cls) -> 'Config':
-        """Get the singleton instance, creating it if necessary"""
+    def get_instance(cls) -> "Config":
+        """Get the singleton instance, creating it if necessary
+
+        Returns:
+            Config instance
+        """
         if cls._instance is None:
             return cls()
         return cls._instance
