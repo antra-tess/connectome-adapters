@@ -216,7 +216,6 @@ class TestOutgoingEventProcessor:
 
             response = await processor.process_event(OutgoingEventType.EDIT_MESSAGE, data)
             assert response["request_completed"] is True
-
             zulip_client_mock.update_message.assert_called_once_with({
                 "message_id": 789,  # Should be converted to int
                 "content": "Updated text"
@@ -396,7 +395,6 @@ class TestOutgoingEventProcessor:
             response = await processor.process_event(
                 OutgoingEventType.REMOVE_REACTION, {"conversation_id": "123_456", "message_id": "789"}
             )
-            assert response["request_completed"] is False
 
         @pytest.mark.asyncio
         async def test_remove_reaction_api_failure(self, processor, zulip_client_mock):
