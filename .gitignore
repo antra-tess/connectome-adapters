@@ -30,8 +30,8 @@ ENV/
 *.session
 
 # Configuration with sensitive data
-config.yaml
+*_config.yaml
 
 # Cache
 .cache/
-telegram_attachments/
+attachments/
