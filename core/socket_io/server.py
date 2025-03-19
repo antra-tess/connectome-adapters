@@ -1,6 +1,6 @@
 import asyncio
-import socketio
 import logging
+import socketio
 import time
 
 from aiohttp import web
@@ -40,7 +40,7 @@ class SocketIOServer:
         self.sio.attach(self.app)
         self.runner = None
         self.site = None
-        self.telegram_bot = None  # Will be set later
+        self.adapter = None  # Will be set later
         self.connected_clients = set()  # Track connected clients
 
         self.event_queue = asyncio.Queue()
@@ -65,12 +65,12 @@ class SocketIOServer:
 
         @self.sio.event
         async def cancel_request(sid, data):
-            """Handle request to send a message to Telegram"""
+            """Handle request to send a message to adapter"""
             await self._cancel_request(sid, data.get("data"))
 
         @self.sio.event
         async def bot_response(sid, data):
-            """Handle request to send a message to Telegram"""
+            """Handle request to send a message to adapter"""
             await self._queue_event(data.get("event_type"), sid, data.get("data"))
 
     async def emit_event(self, event: str, data: Dict[str, Any] = {}) -> None:
@@ -83,13 +83,13 @@ class SocketIOServer:
         await self.sio.emit(event, data)
         logging.info(f"Emitted event: {event} with data: {data}")
 
-    def set_telegram_adapter(self, adapter: Any) -> None:
-        """Set the reference to the Telegram adapter instance
+    def set_adapter(self, adapter: Any) -> None:
+        """Set the reference to the adapter instance
 
         Args:
-            adapter: Telegram adapter instance
+            adapter: Adapter instance
         """
-        self.telegram_adapter = adapter
+        self.adapter = adapter
 
     async def start(self) -> None:
         """Start the Socket.IO server"""
@@ -133,7 +133,7 @@ class SocketIOServer:
         Returns:
             request_id: ID of the queued request
         """
-        request_id = data.get("request_id", f"req_{sid}_{int(time.time() * 1000)}")
+        request_id = data.get("request_id", f"req_{sid}_{int(time.time() * 1e3)}")
         event = SocketIOQueuedEvent(event_type, data, sid, time.time(), request_id)
         self.request_map[request_id] = event
         await self.event_queue.put(event)
@@ -201,7 +201,7 @@ class SocketIOServer:
                     continue
 
                 await self._apply_rate_limiting()
-                result = await self.telegram_adapter.process_socket_io_event(
+                result = await self.adapter.process_socket_io_event(
                     event.event_type, event.data
                 )
 
@@ -235,7 +235,7 @@ class SocketIOServer:
                 await asyncio.sleep(5)  # Prevent tight loop on error
 
     async def _apply_rate_limiting(self) -> None:
-        """Apply rate limiting for Telegram API calls"""
+        """Apply rate limiting for API calls"""
         current_time = time.time()
         time_since_last = current_time - self.last_message_time
 

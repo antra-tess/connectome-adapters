@@ -19,6 +19,7 @@ class ThreadBuilder:
         """Get thread info from Telethon message object
 
         Args:
+            message_cache: Message cache object
             message: Telethon message object
             conversation_info: Conversation info object
             delta: Conversation delta object to update

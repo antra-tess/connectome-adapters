@@ -185,6 +185,7 @@ class TestSocketIOToTelegramFlowIntegration:
 
         setup_conversation()
         setup_conversation_known_member()
+        await setup_message()
         telethon_client_mock.edit_message.return_value = create_message_response(
             text="Edited message content"
         )

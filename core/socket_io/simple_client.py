@@ -9,19 +9,19 @@ sio = socketio.AsyncClient()
 
 @sio.event
 async def connect():
-    print("Connected to Telegram adapter")
+    print("Connected to adapter")
 
 @sio.event
 async def disconnect():
-    print("Disconnected from Telegram adapter")
+    print("Disconnected from adapter")
 
 @sio.event
 async def bot_request(data):
     print("Message received")
     print(f"Data: {data}")
 
-    await asyncio.sleep(5)
-    await send_message(data.get("data").get("conversation_id"), "Hello, world!")
+    #await asyncio.sleep(5)
+    #await send_message(data.get("data").get("conversation_id"), "Hello, world!")
     #await asyncio.sleep(5)
     #await edit_message(data.get("data").get("conversation_id"), data.get("data").get("message_id"), "Hello, world! (edt)")
     #await asyncio.sleep(5)
@@ -47,7 +47,7 @@ async def request_failed(data):
     print(f"Data: {data}")
 
 async def send_message(conversation_id: str, text: str, thread_id: Optional[str] = None) -> None:
-    """Send a message to a Telegram conversation
+    """Send a message to a conversation
 
     Args:
         conversation_id: ID of the conversation (chat/group/channel)
@@ -61,11 +61,11 @@ async def send_message(conversation_id: str, text: str, thread_id: Optional[str]
                 "conversation_id": conversation_id,
                 "text": text,
                 "attachments": [
-                    # {
-                    #     "attachment_type": "photo",
-                    #     "file_path": "telegram_attachments/photo/tmp/234.png",
-                    #     "size": 343929
-                    # }
+                    #{
+                    #    "attachment_type": "photo",
+                    #    "file_path": "adapters/telegram_adapter/attachments/photo/tmp/234.png",
+                    #    "size": 343929
+                    #}
                 ]
             }
         }
@@ -170,7 +170,7 @@ async def remove_reaction(conversation_id: str, message_id: str, emoji: str) -> 
 
 async def main():
     server_url = "http://localhost:8080"
-    logging.info(f"Connecting to Telegram adapter at {server_url}")
+    logging.info(f"Connecting to adapter at {server_url}")
 
     try:
         await sio.connect(server_url)

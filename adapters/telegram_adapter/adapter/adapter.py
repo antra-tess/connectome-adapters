@@ -59,8 +59,7 @@ class TelegramAdapter:
                     self.config,
                     self.telethon_client.client,
                     self.conversation_manager,
-                    self.adapter_name,
-                    self.adapter_type
+                    self.adapter_name
                 )
                 self.socket_io_events_processor = SocketIoEventsProcessor(
                     self.config,

@@ -78,33 +78,35 @@ class SocketIoEventsProcessor:
             return False
 
         conversation_id = self._format_conversation_id(data.get("conversation_id"))
-        message_text = data.get("text")
         reply_to_message_id = data.get("thread_id", None)
         attachments = data.get("attachments", [])
-
+        message_parts = self._split_long_message(data.get("text"))
         try:
             entity = await self._get_entity(conversation_id)
+
             if not entity:
                 return False
 
-            await self.conversation_manager.create_or_update_conversation(
-                "new_message",
-                await self.telethon_client.send_message(
-                    entity=entity,
-                    message=message_text,
-                    reply_to=reply_to_message_id
+            for message in message_parts:
+                await asyncio.sleep(1)
+
+                await self.conversation_manager.add_to_conversation(
+                    message=await self.telethon_client.send_message(
+                        entity=entity,
+                        message=message,
+                        reply_to=reply_to_message_id
+                    )
                 )
-            )
 
             for attachment in attachments:
-                await asyncio.sleep(3)
+                await asyncio.sleep(2)
 
                 attachment_info = await self.uploader.upload_attachment(entity, attachment)
                 if attachment_info and attachment_info.get("message"):
                     message = attachment_info["message"]
                     del attachment_info["message"]
-                    await self.conversation_manager.create_or_update_conversation(
-                        "new_message", message, attachment_info=attachment_info
+                    await self.conversation_manager.add_to_conversation(
+                        message=message, attachment_info=attachment_info
                     )
 
             logging.info(f"Message sent to conversation {conversation_id}")
@@ -125,20 +127,58 @@ class SocketIoEventsProcessor:
         Returns:
             The formatted conversation ID
         """
-        if conversation_id in self.conversation_manager.conversations:
-            conversation_info = self.conversation_manager.conversations[conversation_id]
-
-            if conversation_info.conversation_type == "private":
-                return int(conversation_id)
-            if conversation_info.conversation_type == "group":
-                return int(conversation_id) * -1
-            if conversation_info.conversation_type == "channel":
-                return int(f"-100{conversation_id}")
-
         try:
             return int(conversation_id)
         except (ValueError, TypeError):
             return conversation_id
+
+    def _split_long_message(self, text: str) -> List[str]:
+        """Split a long message at sentence boundaries to fit within Telegram's message length limits.
+        
+        Args:
+            text: The message text to split
+            
+        Returns:
+            List of message parts, each under the maximum length
+        """
+        max_length = self.config.get_setting("adapter", "max_message_length")
+
+        if len(text) <= max_length:
+            return [text]
+
+        sentence_endings = ['. ', '! ', '? ', '.\n', '!\n', '?\n', '.\t', '!\t', '?\t']
+        message_parts = []
+        remaining_text = text
+        
+        while len(remaining_text) > max_length:
+            cut_point = max_length
+
+            for i in range(max_length - 1, max(0, max_length - 200), -1):
+                for ending in sentence_endings:
+                    end_pos = i - len(ending) + 1
+                    if end_pos >= 0 and remaining_text[end_pos:i+1] == ending:
+                        cut_point = i + 1  # Include the ending punctuation and space
+                        break                
+                if cut_point < max_length:
+                    break
+            if cut_point == max_length:
+                last_newline = remaining_text.rfind('\n', 0, max_length)
+                if last_newline > max_length // 2:
+                    cut_point = last_newline + 1
+                else:
+                    last_space = remaining_text.rfind(' ', max_length // 2, max_length)
+                    if last_space > 0:
+                        cut_point = last_space + 1
+                    else:
+                        cut_point = max_length
+            
+            message_parts.append(remaining_text[:cut_point])
+            remaining_text = remaining_text[cut_point:]
+        
+        if remaining_text:
+            message_parts.append(remaining_text)
+        
+        return message_parts
 
     async def _edit_message(self, data: Dict[str, Any]) -> bool:
         """Edit a message
@@ -163,7 +203,7 @@ class SocketIoEventsProcessor:
             if not entity:
                 return False
 
-            await self.conversation_manager.create_or_update_conversation(
+            await self.conversation_manager.update_conversation(
                 "edited_message",
                 await self.telethon_client.edit_message(
                     entity=entity,
@@ -209,7 +249,7 @@ class SocketIoEventsProcessor:
             )
             if messages:
                 await self.conversation_manager.delete_from_conversation(
-                    [message_id], conversation_id
+                    message_ids=[message_id], conversation_id=conversation_id
                 )
 
             logging.info(f"Message deleted in conversation {conversation_id}")
@@ -244,7 +284,7 @@ class SocketIoEventsProcessor:
             if not entity:
                 return False
 
-            await self.conversation_manager.create_or_update_conversation(
+            await self.conversation_manager.update_conversation(
                 "edited_message",
                 await self.telethon_client(functions.messages.SendReactionRequest(
                     peer=entity,
@@ -289,7 +329,7 @@ class SocketIoEventsProcessor:
             old_reactions = getattr(old_message, "reactions", None) if old_message else None
             new_reactions = self._update_reactions_list(old_reactions, emoji)
 
-            await self.conversation_manager.create_or_update_conversation(
+            await self.conversation_manager.update_conversation(
                 "edited_message",
                 await self.telethon_client(functions.messages.SendReactionRequest(
                     peer=entity,

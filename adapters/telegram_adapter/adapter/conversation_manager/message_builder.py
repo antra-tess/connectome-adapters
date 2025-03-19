@@ -18,9 +18,9 @@ class MessageBuilder:
         self.message_data["conversation_id"] = conversation_id
 
         if hasattr(message, 'date'):
-            self.message_data["timestamp"] = message.date
+            self.message_data["timestamp"] = int(message.date.timestamp() * 1e3)
         else:
-            self.message_data["timestamp"] = datetime.now()
+            self.message_data["timestamp"] = int(datetime.now().timestamp() * 1e3)
 
         return self
 

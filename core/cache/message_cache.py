@@ -3,7 +3,7 @@ import logging
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Dict, Optional, Any
+from typing import Dict, Optional, Any, Union
 
 from core.utils.config import Config
 
@@ -15,7 +15,7 @@ class CachedMessage:
     sender_id: str
     sender_name: str
     text: Optional[str]
-    timestamp: datetime
+    timestamp: Optional[int]
     is_from_bot: bool
     reply_to_message_id: Optional[str] = None
     reactions: Dict[str, int] = field(default_factory=dict)
@@ -24,9 +24,10 @@ class CachedMessage:
     @property
     def age_seconds(self) -> float:
         """Get message age in seconds"""
-        return (datetime.now() - self.timestamp).total_seconds()
+        return (datetime.now() - datetime.fromtimestamp(self.timestamp / 1e3)).total_seconds()
 
 class MessageCache:
+    """Tracks and manages message history"""
     def __init__(self, config: Config, start_maintenance=False):
         """Initialize the MessageCache
 
@@ -85,10 +86,12 @@ class MessageCache:
         if len(conversation) <= self.max_messages_per_conversation:
             return
 
-        sorted_messages = sorted(conversation.values(), key=lambda m: m.timestamp)
-        to_keep = sorted_messages[-self.max_messages_per_conversation:]
+        sorted_messages = sorted(
+            conversation.values(),
+            key=lambda m: datetime.fromtimestamp(m.timestamp / 1e3)
+        )
         self.messages[conversation_id] = {
-            msg.message_id: msg for msg in to_keep
+            msg.message_id: msg for msg in sorted_messages[-self.max_messages_per_conversation:]
         }
 
     async def _enforce_total_limit(self) -> None:
@@ -102,7 +105,9 @@ class MessageCache:
         all_messages = []
         for conv_id, messages in self.messages.items():
             for msg_id, msg in messages.items():
-                all_messages.append((conv_id, msg_id, msg.timestamp))
+                all_messages.append(
+                    (conv_id, msg_id, datetime.fromtimestamp(msg.timestamp / 1e3))
+                )
 
         all_messages.sort(key=lambda x: x[2])
 

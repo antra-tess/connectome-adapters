@@ -23,7 +23,8 @@ def default_config_data():
             "retry_delay": 1,
             "connection_check_interval": 1,
             "flood_sleep_threshold": 10,
-            "max_history_limit": 10
+            "max_history_limit": 10,
+            "max_message_length": 20
         },
         "attachments": {
             "storage_dir": "test_attachments",

@@ -21,7 +21,8 @@ class TestTelegramEventsProcessor:
     def conversation_manager_mock(self):
         """Create a mocked conversation manager"""
         manager = AsyncMock()
-        manager.create_or_update_conversation = AsyncMock()
+        manager.add_to_conversation = AsyncMock()
+        manager.update_conversation = AsyncMock()
         manager.delete_from_conversation = AsyncMock()
         manager.migrate_conversation = AsyncMock()
         manager.attachment_download_required = MagicMock(return_value=False)
@@ -127,6 +128,7 @@ class TestTelegramEventsProcessor:
             delta = {
                 "updates": ["conversation_started", "message_received"],
                 "conversation_id": "456",
+                "conversation_type": "private",
                 "message_id": "123",
                 "text": "Text message",
                 "sender": {"user_id": "456", "display_name": "Test User"},
@@ -134,8 +136,9 @@ class TestTelegramEventsProcessor:
                 "attachments": [attachment_info]
             }
 
-            processor.conversation_manager.create_or_update_conversation.return_value = delta
+            processor.conversation_manager.add_to_conversation.return_value = delta
             processor._get_user = AsyncMock(return_value=user_mock)
+            processor._fetch_conversation_history = AsyncMock(return_value=[{"some": "history"}])
             processor._conversation_started_event_info = AsyncMock(return_value={"event_type": "conversation_started"})
             processor._new_message_event_info = AsyncMock(return_value={"event_type": "message_received"})
 
@@ -148,8 +151,11 @@ class TestTelegramEventsProcessor:
             processor.downloader.download_attachment.assert_called_once_with(
                 message_event_mock.message, True
             )
-            processor.conversation_manager.create_or_update_conversation.assert_called_once()
-            processor._conversation_started_event_info.assert_called_once_with(delta)
+            processor.conversation_manager.add_to_conversation.assert_called_once()
+
+            history = processor._fetch_conversation_history.return_value
+
+            processor._conversation_started_event_info.assert_called_once_with(delta, history)
             processor._new_message_event_info.assert_called_once_with(delta)
 
         @pytest.mark.asyncio
@@ -183,12 +189,13 @@ class TestTelegramEventsProcessor:
             delta = {
                 "updates": ["message_edited"],
                 "conversation_id": "456",
+                "conversation_type": "private",
                 "message_id": "123",
                 "text": "Text message",
                 "timestamp": 1234567890000
             }
 
-            processor.conversation_manager.create_or_update_conversation.return_value = delta
+            processor.conversation_manager.update_conversation.return_value = delta
             processor._edited_message_event_info = AsyncMock(return_value={"event_type": "message_updated"})
 
             result = await processor._handle_edited_message(message_event_mock)
@@ -204,12 +211,13 @@ class TestTelegramEventsProcessor:
             delta = {
                 "updates": ["reaction_added"],
                 "conversation_id": "456",
+                "conversation_type": "private",
                 "message_id": "123",
                 "added_reactions": ["👍", "❤️"],
                 "timestamp": 1234567890000
             }
 
-            processor.conversation_manager.create_or_update_conversation.return_value = delta
+            processor.conversation_manager.update_conversation.return_value = delta
             processor._reaction_update_event_info = AsyncMock(return_value={"event_type": "reaction_added"})
 
             result = await processor._handle_edited_message(message_event_mock)
@@ -225,12 +233,13 @@ class TestTelegramEventsProcessor:
             delta = {
                 "updates": ["reaction_removed"],
                 "conversation_id": "456",
+                "conversation_type": "private",
                 "message_id": "123",
                 "removed_reactions": ["👍"],
                 "timestamp": 1234567890000
             }
 
-            processor.conversation_manager.create_or_update_conversation.return_value = delta
+            processor.conversation_manager.update_conversation.return_value = delta
             processor._reaction_update_event_info = AsyncMock(return_value={"event_type": "reaction_removed"})
 
             result = await processor._handle_edited_message(message_event_mock)
@@ -265,7 +274,7 @@ class TestTelegramEventsProcessor:
             assert {"event_type": "message_deleted"} in result
 
             processor.conversation_manager.delete_from_conversation.assert_called_once_with(
-                [123, 456], 789
+                event=deleted_message_event_mock
             )
             assert processor._deleted_message_event_info.call_count == 2
 
@@ -340,7 +349,7 @@ class TestTelegramEventsProcessor:
         async def test_handle_chat_migration(self, processor, chat_action_event_mock):
             """Test handling a chat migration action"""
             assert await processor._handle_chat_action(chat_action_event_mock) == []
-            processor.conversation_manager.migrate_conversation.assert_called_once_with(456, 789)
+            processor.conversation_manager.migrate_conversation.assert_called_once()
 
         @pytest.mark.asyncio
         async def test_handle_pin_message(self, processor, pin_action_event_mock):
@@ -348,10 +357,11 @@ class TestTelegramEventsProcessor:
             delta = {
                 "updates": ["message_pinned"],
                 "conversation_id": "456",
+                "conversation_type": "private",
                 "message_id": "123",
                 "timestamp": 1234567890000
             }
-            processor.conversation_manager.create_or_update_conversation.return_value = delta
+            processor.conversation_manager.update_conversation.return_value = delta
             processor._pinned_status_change_event_info = AsyncMock(
                 return_value={"event_type": "message_pinned"}
             )
@@ -361,7 +371,7 @@ class TestTelegramEventsProcessor:
             assert len(result) == 1
             assert {"event_type": "message_pinned"} in result
 
-            processor.conversation_manager.create_or_update_conversation.assert_called_once_with(
+            processor.conversation_manager.update_conversation.assert_called_once_with(
                 "pinned_message", pin_action_event_mock.action_message
             )
             processor._pinned_status_change_event_info.assert_called_once_with(
@@ -374,10 +384,11 @@ class TestTelegramEventsProcessor:
             delta = {
                 "updates": ["message_unpinned"],
                 "conversation_id": "456",
+                "conversation_type": "private",
                 "message_id": "123",
                 "timestamp": 1234567890000
             }
-            processor.conversation_manager.create_or_update_conversation.return_value = delta
+            processor.conversation_manager.update_conversation.return_value = delta
             processor._pinned_status_change_event_info = AsyncMock(
                 return_value={"event_type": "message_unpinned"}
             )
@@ -387,7 +398,7 @@ class TestTelegramEventsProcessor:
             assert len(result) == 1
             assert {"event_type": "message_unpinned"} in result
 
-            processor.conversation_manager.create_or_update_conversation.assert_called_once_with(
+            processor.conversation_manager.update_conversation.assert_called_once_with(
                 "unpinned_message", unpin_action_event_mock.original_update
             )
             processor._pinned_status_change_event_info.assert_called_once_with(
@@ -400,12 +411,15 @@ class TestTelegramEventsProcessor:
         @pytest.mark.asyncio
         async def test_conversation_started_event_info(self, processor):
             """Test creating a conversation started event"""
-            result = await processor._conversation_started_event_info({"conversation_id": "123"})
+            delta = {"conversation_id": "123"}
+            history = [{"message_id": "1", "text": "Test history message"}]
+            
+            result = await processor._conversation_started_event_info(delta, history)
 
             assert result["adapter_type"] == "telegram"
             assert result["event_type"] == "conversation_started"
             assert result["data"]["conversation_id"] == "123"
-            assert result["data"]["history"] == []
+            assert result["data"]["history"] == history
 
         @pytest.mark.asyncio
         async def test_new_message_event_info(self, processor):

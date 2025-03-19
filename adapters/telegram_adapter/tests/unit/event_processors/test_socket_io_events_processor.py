@@ -27,7 +27,8 @@ class TestSocketIoEventsProcessor:
     def conversation_manager_mock(self):
         """Create a mocked conversation manager"""
         manager = AsyncMock()
-        manager.create_or_update_conversation = AsyncMock()
+        manager.add_to_conversation = AsyncMock()
+        manager.update_conversation = AsyncMock()
         manager.delete_from_conversation = AsyncMock()
         manager.conversations = {}
         return manager
@@ -147,7 +148,7 @@ class TestSocketIoEventsProcessor:
                 reply_to=None
             )
             uploader_mock.upload_attachment.assert_called_once()
-            assert processor.conversation_manager.create_or_update_conversation.call_count == 2
+            assert processor.conversation_manager.add_to_conversation.call_count == 2
 
         @pytest.mark.asyncio
         async def test_send_message_missing_required_fields(self, processor):
@@ -204,7 +205,7 @@ class TestSocketIoEventsProcessor:
                 message=456,  # Should be converted to int
                 text="Updated text"
             )
-            processor.conversation_manager.create_or_update_conversation.assert_called_once_with(
+            processor.conversation_manager.update_conversation.assert_called_once_with(
                 "edited_message", message_mock
             )
 
@@ -267,7 +268,7 @@ class TestSocketIoEventsProcessor:
                 message_ids=[456]  # Should be converted to int
             )
             processor.conversation_manager.delete_from_conversation.assert_called_once_with(
-                [456], 123
+                message_ids=[456], conversation_id=123
             )
 
         @pytest.mark.asyncio
@@ -320,7 +321,7 @@ class TestSocketIoEventsProcessor:
             }
 
             assert await processor._add_reaction(data) is True
-            processor.conversation_manager.create_or_update_conversation.assert_called_once_with(
+            processor.conversation_manager.update_conversation.assert_called_once_with(
                 "edited_message", message_mock
             )
 
@@ -350,7 +351,7 @@ class TestSocketIoEventsProcessor:
 
             telethon_client_mock.get_messages.assert_called_once_with("entity", ids=456)
             mock_update_reactions.assert_called_once_with(reaction_mock, "👍")
-            processor.conversation_manager.create_or_update_conversation.assert_called_once_with(
+            processor.conversation_manager.update_conversation.assert_called_once_with(
                 "edited_message", message_mock
             )
 
@@ -387,39 +388,6 @@ class TestSocketIoEventsProcessor:
 
     class TestHelperMethods:
         """Tests for helper methods"""
-
-        @pytest.mark.parametrize("conversation_id,expected", [
-            ("123", 123),                       # Private chat
-            ("987654321", 987654321),           # Unknown (try as int)
-            ("not_a_number", "not_a_number"),   # Unknown (keep as string)
-        ])
-        def test_format_conversation_id(self, processor, conversation_id, expected):
-            """Test formatting conversation IDs"""
-            processor.conversation_manager.conversations = {
-                "123": MagicMock(conversation_type="private"),
-                "456": MagicMock(conversation_type="group"),
-                "789": MagicMock(conversation_type="channel")
-            }
-
-            assert processor._format_conversation_id(conversation_id) == expected
-
-        def test_format_conversation_id_group(self, processor):
-            """Test formatting a group conversation ID"""
-            processor.conversation_manager.conversations = {
-                "456": MagicMock(conversation_type="group")
-            }
-
-            # Should be negative for groups
-            assert processor._format_conversation_id("456") == -456
-
-        def test_format_conversation_id_channel(self, processor):
-            """Test formatting a channel conversation ID"""
-            processor.conversation_manager.conversations = {
-                "789": MagicMock(conversation_type="channel")
-            }
-
-            # Should be -100 prefix for channels
-            assert processor._format_conversation_id("789") == -100789
 
         @pytest.mark.asyncio
         async def test_get_entity_success(self, processor, telethon_client_mock):

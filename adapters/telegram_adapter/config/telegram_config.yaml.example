@@ -8,6 +8,7 @@ adapter:
   connection_check_interval: 300  # Seconds to check connection
   flood_sleep_threshold: 120  # Seconds to sleep on flood wait
   max_history_limit: 100  # Maximum messages to retrieve at once
+  max_message_length: 4000
 attachments:
   storage_dir: "telegram_attachments"
   max_age_days: 30

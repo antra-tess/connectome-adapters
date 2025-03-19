@@ -110,7 +110,9 @@ class TestReactionHandler:
 
     def test_update_message_reactions_added(self, mock_message, mock_cached_message):
         """Test updating message reactions when reactions are added"""
-        delta = ConversationDelta(conversation_id="123")
+        delta = ConversationDelta(
+            conversation_id="123", conversation_type="private"
+        )
         new_reactions = {"👍": 2, "❤️": 1}  # Added ❤️ and increased 👍 count
 
         result = ReactionHandler.update_message_reactions(
@@ -128,7 +130,9 @@ class TestReactionHandler:
 
     def test_update_message_reactions_removed(self, mock_message, mock_cached_message):
         """Test updating message reactions when reactions are removed"""
-        delta = ConversationDelta(conversation_id="123")
+        delta = ConversationDelta(
+            conversation_id="123", conversation_type="private"
+        )
         mock_cached_message.reactions = {"👍": 2, "❤️": 1}  # Initial state
         new_reactions = {"👍": 1}  # Decreased 👍 count and removed ❤️
 

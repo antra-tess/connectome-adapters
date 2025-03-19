@@ -28,18 +28,14 @@ class Config:
 
     def load_config(self) -> None:
         """Load configuration from YAML file"""
-        try:
-            if os.path.exists(self.config_path):
-                with open(self.config_path, "r") as file:
-                    config = yaml.safe_load(file) or {}
-                    for category in self.categories:
-                        if category in config and isinstance(config[category], dict):
-                            setattr(self, category, config[category])
-                logger.info("Loaded configuration")
-            else:
-                logger.error("Config file not found")
-        except Exception as e:
-            logger.error(f"Error loading config: {str(e)}")
+        if os.path.exists(self.config_path):
+            with open(self.config_path, "r") as file:
+                config = yaml.safe_load(file) or {}
+                for category in self.categories:
+                    if category in config and isinstance(config[category], dict):
+                        setattr(self, category, config[category])
+        else:
+            raise FileNotFoundError("Config file not found")
 
     def get_setting(self, category: str, key: str, default=None):
         """Get a specific setting with support for nested keys (e.g., "test.foo")

@@ -31,7 +31,9 @@ class TestUserBuilder:
     @pytest.fixture
     def delta(self):
         """Create a conversation delta object"""
-        return ConversationDelta(conversation_id="789")
+        return ConversationDelta(
+            conversation_id="789", conversation_type="private"
+        )
 
     def test_add_user_info_new_user(self, mock_user, conversation_info, delta):
         """Test adding a new user to conversation info"""

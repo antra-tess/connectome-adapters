@@ -90,6 +90,7 @@ class ConversationInfo:
 class ConversationDelta:
     """Changes in conversation state"""
     conversation_id: str
+    conversation_type: str
     updates: List[str] = field(default_factory=list)
     message_id: Optional[str] = None
     timestamp: Optional[int] = None
@@ -102,7 +103,11 @@ class ConversationDelta:
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for API responses"""
-        result = {"conversation_id": self.conversation_id, "updates": self.updates}
+        result = {
+            "conversation_id": self.conversation_id,
+            "conversation_type": self.conversation_type,
+            "updates": self.updates
+        }
 
         if self.message_id:
             result["message_id"] = self.message_id

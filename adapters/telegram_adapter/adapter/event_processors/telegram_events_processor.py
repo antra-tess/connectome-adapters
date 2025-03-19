@@ -4,12 +4,15 @@ import logging
 import os
 import telethon
 
+from datetime import datetime
 from enum import Enum
+from telethon import functions
 from typing import List, Dict, Any, Optional, Union
 
-from core.utils.config import Config
-from adapters.telegram_adapter.adapter.conversation_manager.conversation_manager import ConversationManager
 from adapters.telegram_adapter.adapter.attachment_loaders.downloader import Downloader
+from adapters.telegram_adapter.adapter.conversation_manager.conversation_manager import ConversationManager
+from adapters.telegram_adapter.adapter.event_processors.telegram_history_formatter import TelegramHistoryFormatter
+from core.utils.config import Config
 
 class EventType(str, Enum):
     """Event types supported by the TelegramEventsProcessor"""
@@ -59,9 +62,6 @@ class TelegramEventsProcessor:
                 EventType.CHAT_ACTION: self._handle_chat_action
             }
 
-            print(event)
-            print()
-
             handler = event_handlers.get(event_type)
             if handler:
                 return await handler(event)
@@ -85,20 +85,22 @@ class TelegramEventsProcessor:
 
         try:
             message = event.message
-            attachment_info = await self.downloader.download_attachment(
-                message,
-                self.conversation_manager.attachment_download_required(message)
-            )
-            delta = await self.conversation_manager.create_or_update_conversation(
-                "new_message",
-                message,
-                await self._get_user(message),
-                attachment_info
+            delta = await self.conversation_manager.add_to_conversation(
+                message=message,
+                user=await self._get_user(message),
+                attachment_info=await self.downloader.download_attachment(
+                    message,
+                    self.conversation_manager.attachment_download_required(message)
+                )
             )
 
             if delta:
                 if "conversation_started" in delta["updates"]:
-                    events.append(await self._conversation_started_event_info(delta))
+                    history = await self._fetch_conversation_history(
+                        delta["conversation_id"],
+                        delta["message_id"]
+                    )
+                    events.append(await self._conversation_started_event_info(delta, history))
                 if "message_received" in delta["updates"]:
                     events.append(await self._new_message_event_info(delta))
         except Exception as e:
@@ -125,12 +127,53 @@ class TelegramEventsProcessor:
 
         return None
 
-    async def _conversation_started_event_info(self, delta: Dict[str, Any]) -> Dict[str, Any]:
+    async def _fetch_conversation_history(self,
+                                          conversation_id: str,
+                                          message_id: str) -> List[Dict[str, Any]]:
+        """Fetch and format recent conversation history from Telegram
+        
+        Args:
+            conversation_id: ID of the conversation
+            message_id: ID of the message that triggered the history fetch
+            
+        Returns:
+            List of formatted message objects for the history
+        """
+        try:
+            try:
+                conversation_id = int(conversation_id)
+            except (ValueError, TypeError):
+                pass
+
+            return await TelegramHistoryFormatter(
+                self.config,
+                self.downloader,
+                self.conversation_manager,
+                await self.telethon_client(functions.messages.GetHistoryRequest(
+                    peer=conversation_id,
+                    offset_id=int(message_id),
+                    offset_date=datetime.now(),
+                    add_offset=0,
+                    limit=self.config.get_setting("adapter", "max_history_limit"),
+                    max_id=0,
+                    min_id=0,
+                    hash=0  # This value doesn't matter for most requests
+                )),
+                conversation_id,
+                message_id
+            ).format_history()
+        except Exception as e:
+            logging.error(f"Error fetching conversation history: {e}", exc_info=True)
+            return []
+        
+    async def _conversation_started_event_info(self,
+                                               delta: Dict[str, Any],
+                                               history: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Create a conversation started event
 
         Args:
             delta: Event change information
-
+            history: List of formatted message objects for the history
         Returns:
             Formatted event dictionary
         """
@@ -139,7 +182,7 @@ class TelegramEventsProcessor:
             "event_type": "conversation_started",
             "data" : {
                 "conversation_id": delta["conversation_id"],
-                "history": []
+                "history": history
             }
         }
 
@@ -182,7 +225,7 @@ class TelegramEventsProcessor:
         events = []
 
         try:
-            delta = await self.conversation_manager.create_or_update_conversation(
+            delta = await self.conversation_manager.update_conversation(
                 "edited_message", event.message
             )
 
@@ -265,10 +308,7 @@ class TelegramEventsProcessor:
         events = []
 
         try:
-            conversation_id = await self.conversation_manager.delete_from_conversation(
-                getattr(event, "deleted_ids", []),
-                getattr(event, "channel_id", None)
-            )
+            conversation_id = await self.conversation_manager.delete_from_conversation(event=event)
 
             if conversation_id:
                 for deleted_id in event.deleted_ids:
@@ -321,21 +361,19 @@ class TelegramEventsProcessor:
                     "MessageActionChatMigrateTo",
                     "MessageActionChannelMigrateFrom"
                 ]:
-                    await self.conversation_manager.migrate_conversation(
-                        getattr(message.peer_id, "chat_id", None),
-                        getattr(action, "channel_id", None)
-                    )
+                    await self.conversation_manager.migrate_conversation(message, action)
                     return []
                 
                 if action_type == "MessageActionPinMessage":
-                    delta = await self.conversation_manager.create_or_update_conversation("pinned_message", message)    
+                    delta = await self.conversation_manager.update_conversation(
+                        "pinned_message", message
+                    )
                     if delta and "message_pinned" in delta["updates"]:
                         return [await self._pinned_status_change_event_info("message_pinned", delta)]
 
             elif not message and hasattr(event, "original_update"):
-                delta = await self.conversation_manager.create_or_update_conversation(
-                    "unpinned_message",
-                    event.original_update
+                delta = await self.conversation_manager.update_conversation(
+                    "unpinned_message", event.original_update
                 )
                 if delta and "message_unpinned" in delta["updates"]:
                     return [await self._pinned_status_change_event_info("message_unpinned", delta)]

@@ -52,7 +52,7 @@ class TestMessageBuilder:
 
         assert builder.message_data["message_id"] == "123"
         assert builder.message_data["conversation_id"] == "conversation123"
-        assert builder.message_data["timestamp"] == mock_message.date
+        assert builder.message_data["timestamp"] == int(mock_message.date.timestamp() * 1e3)
         assert result is builder
 
     def test_with_sender_info(self, builder, mock_sender):
@@ -130,7 +130,7 @@ class TestMessageBuilder:
 
         assert result["message_id"] == "123"
         assert result["conversation_id"] == "conversation123"
-        assert result["timestamp"] == mock_message.date
+        assert result["timestamp"] == int(mock_message.date.timestamp() * 1e3)
         assert result["sender_id"] == 789
         assert result["sender_name"] == "Test User"
         assert result["is_from_bot"] is False

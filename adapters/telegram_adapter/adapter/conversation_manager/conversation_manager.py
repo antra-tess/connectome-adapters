@@ -3,8 +3,7 @@ import os
 
 from datetime import datetime
 from enum import Enum
-from typing import Dict, Optional, List, Any, Union
-from contextlib import contextmanager
+from typing import Dict, Optional, List, Any
 
 from adapters.telegram_adapter.adapter.conversation_manager.conversation_data_classes import (
     ConversationInfo, ConversationDelta, UpdateType
@@ -37,6 +36,7 @@ class ConversationManager:
             config: Config instance
             start_maintenance: Whether to start the maintenance loop
         """
+        self.config = config
         self.conversations: Dict[str, ConversationInfo] = {}
         self.migrations: Dict[str, str] = {}
         self._lock = asyncio.Lock()
@@ -47,30 +47,13 @@ class ConversationManager:
         self.thread_builder = ThreadBuilder()
         self.user_builder = UserBuilder()
 
-    @contextmanager
-    def _get_conversation(self, conversation_id: str):
-        """Context manager for getting a conversation
+    async def add_to_conversation(self,
+                                  message: Any,
+                                  user: Optional[Any] = None,
+                                  attachment_info: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Create a new conversation or add a message to an existing conversation
 
         Args:
-            conversation_id: ID of the conversation
-
-        Yields:
-            ConversationInfo object
-        """
-        conversation = self.conversations.get(conversation_id)
-        yield conversation
-        if conversation:
-            conversation.last_activity = datetime.now()
-
-    async def create_or_update_conversation(self,
-                                            event_type: str,
-                                            message: Any,
-                                            user: Optional[Any] = None,
-                                            attachment_info: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """Update conversation information based on a Telethon event
-
-        Args:
-            event_type: Type of event (new_message, edited_message, etc.)
             message: Telethon message object
             user: Optional user object
             attachment_info: Optional attachment information
@@ -87,7 +70,8 @@ class ConversationManager:
                 return {}
 
             delta = ConversationDelta(
-                conversation_id=conversation_info.conversation_id
+                conversation_id=conversation_info.conversation_id,
+                conversation_type=conversation_info.conversation_type
             )
 
             if conversation_info.just_started:
@@ -103,12 +87,10 @@ class ConversationManager:
                 )
                 delta.attachments = attachment_data["attachments"]
 
-            if event_type in [EventType.NEW_MESSAGE, EventType.EDITED_MESSAGE]:
-                await self.thread_builder.add_thread_info_to_conversation(
-                    self.message_cache, message, conversation_info, delta
-                )
-
-            await self._process_event(event_type, message, conversation_info, delta)
+            await self.thread_builder.add_thread_info_to_conversation(
+                self.message_cache, message, conversation_info, delta
+            )
+            await self._create_message(message, conversation_info, delta)
 
             return delta.to_dict()
 
@@ -121,10 +103,7 @@ class ConversationManager:
         Returns:
             ConversationInfo object or None if conversation can't be determined
         """
-        if not hasattr(message, "peer_id") and not hasattr(message, "peer"):
-            return None
-        
-        peer = getattr(message, "peer_id", None) or getattr(message, "peer")
+        peer = await self._get_peer(message)
         conversation_id = await self._get_conversation_id(peer)
 
         if not conversation_id:
@@ -140,6 +119,20 @@ class ConversationManager:
 
         return self.conversations[conversation_id]
 
+    async def _get_peer(self, message: Any) -> Any:
+        """Get the peer from a Telethon message
+
+        Args:
+            message: Telethon message object
+
+        Returns:
+            Peer object or None if not found
+        """
+        if not hasattr(message, "peer_id") and not hasattr(message, "peer"):
+            return None
+
+        return getattr(message, "peer_id", None) or getattr(message, "peer")
+
     async def _get_conversation_id(self, peer: Any) -> Optional[str]:
         """Get the conversation ID from a Telethon message
 
@@ -149,12 +142,12 @@ class ConversationManager:
         Returns:
             Conversation ID as string, or None if not found
         """
-        if hasattr(peer, "user_id"):
+        if hasattr(peer, "user_id") and peer.user_id:
             return str(peer.user_id)
-        if hasattr(peer, "chat_id"):
-            return str(peer.chat_id)
-        if hasattr(peer, "channel_id"):
-            return str(peer.channel_id)
+        if hasattr(peer, "chat_id") and peer.chat_id:
+            return str(int(peer.chat_id) * -1)
+        if hasattr(peer, "channel_id") and peer.channel_id:
+            return f"-100{peer.channel_id}"
 
         return None
 
@@ -167,11 +160,11 @@ class ConversationManager:
         Returns:
             Conversation type as string, or None if not found
         """
-        if hasattr(peer, "user_id"):
+        if hasattr(peer, "user_id") and peer.user_id:
             return "private"
-        if hasattr(peer, "chat_id"):
+        if hasattr(peer, "chat_id") and peer.chat_id:
             return "group"
-        if hasattr(peer, "channel_id"):
+        if hasattr(peer, "channel_id") and peer.channel_id:
             return "channel"
 
         return None
@@ -208,6 +201,63 @@ class ConversationManager:
             ]
         }
 
+    async def _create_message(self,
+                              message: Any,
+                              conversation_info: ConversationInfo,
+                              delta: ConversationDelta) -> None:
+        """Create a new message in the cache
+
+        Args:
+            message: Telethon message object
+            conversation_info: Conversation info object
+            delta: Delta object to update
+        """
+        delta.message_id = str(message.id)
+        delta.timestamp = int(getattr(message, "date", datetime.now()).timestamp() * 1e3)
+
+        message_data = self.message_builder.reset() \
+            .with_basic_info(message, conversation_info.conversation_id) \
+            .with_sender_info(delta.sender) \
+            .with_thread_info(delta.thread_id, message) \
+            .with_content(message) \
+            .build()
+
+        cached_msg = await self.message_cache.add_message(message_data)
+        cached_msg.reactions = await self.reaction_handler.extract_reactions(message.reactions)
+
+        conversation_info.message_count += 1
+
+        delta.text = cached_msg.text
+        delta.updates.append(UpdateType.MESSAGE_RECEIVED)
+
+    async def update_conversation(self, event_type: str, message: Any) -> Dict[str, Any]:
+        """Update conversation information based on a Telethon event
+
+        Args:
+            event_type: Type of event (edited_message, added_reaction, etc.)
+            message: Telethon message object
+
+        Returns:
+            Dictionary with delta information
+        """
+        async with self._lock:
+            if not message:
+                return {}
+
+            conversation_id = await self._get_conversation_id(await self._get_peer(message))
+            if not conversation_id or conversation_id not in self.conversations:
+                return {}
+
+            conversation_info = self.conversations[conversation_id]
+            delta = ConversationDelta(
+                conversation_id=conversation_info.conversation_id,
+                conversation_type=conversation_info.conversation_type
+            )
+
+            await self._process_event(event_type, message, conversation_info, delta)
+
+            return delta.to_dict()
+
     async def _process_event(self,
                              event_type: str,
                              message: Any,
@@ -221,8 +271,8 @@ class ConversationManager:
             conversation_info: Conversation info object
             delta: Delta object to update
         """
-        if event_type in [EventType.NEW_MESSAGE, EventType.EDITED_MESSAGE]:
-            await self._process_regular_message(event_type, message, conversation_info, delta)
+        if event_type == EventType.EDITED_MESSAGE:
+            await self._update_message(message, conversation_info, delta)
             return
 
         if event_type == EventType.PINNED_MESSAGE:
@@ -232,74 +282,37 @@ class ConversationManager:
         if event_type == EventType.UNPINNED_MESSAGE:
             await self._unpin_message(message, conversation_info, delta)
 
-    async def _process_regular_message(self,
-                                       event_type: str,
-                                       message: Any,
-                                       conversation_info: ConversationInfo,
-                                       delta: ConversationDelta) -> None:
+    async def _update_message(self,
+                              message: Any,
+                              conversation_info: ConversationInfo,
+                              delta: ConversationDelta) -> None:
         """Process a message based on event type
 
         Args:
-            event_type: Type of event
             message: Telethon message object
             conversation_info: Conversation info object
             delta: Delta object to update
         """
         delta.message_id = str(message.id)
-        delta.timestamp = int(getattr(message, "date", datetime.now()).timestamp() * 1000)
+        delta.timestamp = int(getattr(message, "date", datetime.now()).timestamp() * 1e3)
 
-        reactions = await self.reaction_handler.extract_reactions(message.reactions)
         cached_msg = await self.message_cache.get_message_by_id(
             conversation_id=conversation_info.conversation_id,
             message_id=delta.message_id
         )
 
-        if event_type == EventType.EDITED_MESSAGE and cached_msg:
+        if cached_msg:
             if message.message is not None and message.message != cached_msg.text:
                 cached_msg.text = message.message
                 delta.text = cached_msg.text
                 delta.updates.append(UpdateType.MESSAGE_EDITED)
             elif message.message == cached_msg.text:
                 self.reaction_handler.update_message_reactions(
-                    message, cached_msg, reactions, delta
+                    message,
+                    cached_msg,
+                    await self.reaction_handler.extract_reactions(message.reactions),
+                    delta
                 )
-        else:
-            await self._create_new_message(
-                event_type, message, reactions, conversation_info, delta
-            )
-
-    async def _create_new_message(self,
-                                  event_type: str,
-                                  message: Any,
-                                  reactions: Dict[str, int],
-                                  conversation_info: ConversationInfo,
-                                  delta: ConversationDelta) -> None:
-        """Create a new message in the cache
-
-        Args:
-            event_type: Type of event
-            message: Telethon message object
-            reactions: Extracted reactions
-            conversation_info: Conversation info object
-            delta: Delta object to update
-        """
-        message_data = self.message_builder.reset() \
-            .with_basic_info(message, conversation_info.conversation_id) \
-            .with_sender_info(delta.sender) \
-            .with_thread_info(delta.thread_id, message) \
-            .with_content(message) \
-            .build()
-
-        cached_msg = await self.message_cache.add_message(message_data)
-        conversation_info.message_count += 1
-        cached_msg.reactions = reactions
-
-        delta.text = cached_msg.text
-
-        if event_type == EventType.NEW_MESSAGE:
-            delta.updates.append(UpdateType.MESSAGE_RECEIVED)
-        else:
-            delta.updates.append(UpdateType.MESSAGE_EDITED)
 
     async def _pin_message(self,
                            message: Any,
@@ -314,7 +327,7 @@ class ConversationManager:
         """
         if hasattr(message, 'reply_to') and message.reply_to:
             delta.message_id = str(message.reply_to.reply_to_msg_id)
-            delta.timestamp = int(getattr(message, "date", datetime.now()).timestamp() * 1000)
+            delta.timestamp = int(getattr(message, "date", datetime.now()).timestamp() * 1e3)
             
             await self._update_pin_status(
                 delta.message_id, conversation_info, delta, True
@@ -333,7 +346,7 @@ class ConversationManager:
         """
         if hasattr(message, 'messages') and message.messages:
             delta.message_id = str(message.messages[0])
-            delta.timestamp = int(datetime.now().timestamp() * 1000)
+            delta.timestamp = int(datetime.now().timestamp() * 1e3)
             
             await self._update_pin_status(
                 delta.message_id, conversation_info, delta, False
@@ -357,11 +370,6 @@ class ConversationManager:
             message_id=message_id
         )
 
-        print(cached_msg)
-        print(self.message_cache.messages)
-        print(conversation_info.conversation_id)
-        print(message_id)
-
         if not cached_msg:
             return
 
@@ -375,25 +383,25 @@ class ConversationManager:
             delta.updates.append(UpdateType.MESSAGE_UNPINNED)
 
     async def delete_from_conversation(self,
-                                       deleted_ids: List[Union[str, int]],
-                                       conversation_id: Optional[Union[str, int]] = None) -> Optional[str]:
+                                       event: Any = None,
+                                       message_ids: List[str] = [],
+                                       conversation_id: Optional[str] = None) -> Optional[str]:
         """Handle deletion of messages from a conversation
 
         Args:
-            deleted_ids: List of message IDs to delete
+            event: Telethon event object
+            message_ids: List of message IDs to delete
             conversation_id: Optional conversation ID
 
         Returns:
             Conversation ID if successful, None otherwise
         """
-        if not deleted_ids:
-            return None
+        deleted_ids = [str(msg_id) for msg_id in getattr(event, "deleted_ids", [])] if event else message_ids
+        conversation_id = await self._get_conversation_id(event) if event else conversation_id
 
         async with self._lock:
             deleted_ids = [str(msg_id) for msg_id in deleted_ids]
-            conversation_info = self._find_conversation_info_to_delete_from(
-                deleted_ids, str(conversation_id)
-            )
+            conversation_info = self._find_conversation_info_to_delete_from(deleted_ids, conversation_id)
 
             if conversation_info:
                 for msg_id in deleted_ids:
@@ -436,20 +444,23 @@ class ConversationManager:
 
         return best_match
 
-    async def migrate_conversation(self,
-                                   old_conversation_id: Optional[Union[str, int]],
-                                   new_conversation_id: Optional[Union[str, int]]) -> None:
+    async def migrate_conversation(self, message: Any, action: Any) -> None:
         """Handle a supergroup that was migrated from a regular group
 
         Args:
-            old_conversation_id: Old conversation ID
-            new_conversation_id: New conversation ID
+            message: Telethon message object
+            action: Telethon action object
         """
-        if not old_conversation_id or not new_conversation_id:
+        if not message or not hasattr(message, "peer_id") or not action:
             return
 
-        old_conversation_id = str(old_conversation_id)
-        new_conversation_id = str(new_conversation_id)
+        old_conversation_id = await self._get_conversation_id(message.peer_id)
+        new_conversation_id = await self._get_conversation_id(action)
+
+        if not old_conversation_id or not new_conversation_id:
+            return
+        
+        print(f"Migrating conversation from {old_conversation_id} to {new_conversation_id}")
 
         async with self._lock:
             self.migrations[old_conversation_id] = new_conversation_id
