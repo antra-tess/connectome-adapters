@@ -26,7 +26,7 @@ class UserInfo:
     def display_name(self) -> str:
         """Get a human-readable display name"""
         if self.username:
-            return f"@{self.username}"
+            return self.username
 
         name_parts = []
         if self.first_name:
@@ -67,18 +67,14 @@ class ConversationInfo:
     known_members: Dict[str, UserInfo] = field(default_factory=dict)
     just_started: bool = False
 
-    # Migration tracking
-    migrated_from_conversation_id: Optional[str] = None
-    migrated_to_conversation_id: Optional[str] = None
-
     # Add thread tracking
     threads: Dict[str, ThreadInfo] = field(default_factory=dict)
 
     # Add attachment tracking
     attachments: Set[str] = field(default_factory=set)
 
-    # Add pinned message tracking
-    pinned_messages: Set[str] = field(default_factory=set)
+    # Add message tracking
+    messages: Set[str] = field(default_factory=set)
 
     def __post_init__(self):
         if self.created_at is None:
@@ -90,6 +86,7 @@ class ConversationInfo:
 class ConversationDelta:
     """Changes in conversation state"""
     conversation_id: str
+    conversation_type: str
     updates: List[str] = field(default_factory=list)
     message_id: Optional[str] = None
     timestamp: Optional[int] = None

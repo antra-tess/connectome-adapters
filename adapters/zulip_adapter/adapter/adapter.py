@@ -1,10 +1,10 @@
 import asyncio
-import json
 import logging
-import os
+import zulip
 
 from typing import Any
 
+from adapters.zulip_adapter.adapter.zulip_client import ZulipClient
 from adapters.zulip_adapter.adapter.conversation_manager.conversation_manager import ConversationManager
 from adapters.zulip_adapter.adapter.event_processors.zulip_events_processor import ZulipEventsProcessor
 from adapters.zulip_adapter.adapter.event_processors.socket_io_events_processor import SocketIoEventsProcessor
@@ -14,7 +14,7 @@ from core.utils.config import Config
 class ZulipAdapter:
     """Zulip ZulipAdapter implementation using Zulip"""
     ADAPTER_VERSION = "0.1.0"  # Our adapter version
-    TESTED_WITH_API = "8.3"    # Zulip API version we've tested with
+    TESTED_WITH_API = "v1"     # Zulip API version we have tested with
 
     def __init__(self, config: Config, socketio_server, start_maintenance=False):
         """Initialize the Zulip adapter
@@ -42,12 +42,10 @@ class ZulipAdapter:
         self.running = True
 
         try:
-            #self.zulip_client = ZulipClient(
-            #    config=self.config, event_callback=self.process_zulip_event
-            #)
-            #connected = await self.zulip_client.connect()
+            self.zulip_client = ZulipClient(self.config, self.process_zulip_event)
+            await self.zulip_client.connect()
 
-            if False: #connected:
+            if self.zulip_client.running:
                 self.initialized = True
 
                 await self._get_adapter_info()
@@ -55,16 +53,17 @@ class ZulipAdapter:
 
                 self.zulip_events_processor = ZulipEventsProcessor(
                     self.config,
-                    self.zulip_client.client,
+                    self.zulip_client,
                     self.conversation_manager,
-                    self.adapter_name,
-                    self.adapter_type
+                    self.adapter_name
                 )
                 self.socket_io_events_processor = SocketIoEventsProcessor(
                     self.config,
-                    self.zulip_client.client,
+                    self.zulip_client,
                     self.conversation_manager
                 )
+
+                await self.zulip_client.start_polling()
                 self.monitoring_task = asyncio.create_task(self._monitor_connection())
 
                 await self.socketio_server.emit_event(
@@ -82,14 +81,15 @@ class ZulipAdapter:
 
     async def _get_adapter_info(self) -> None:
         """Get adapter information"""
-        adapter_info = None
-        self.adapter_name = getattr(adapter_info, "username", None)
+        adapter_info = self.zulip_client.client.get_profile()
+        self.adapter_name = adapter_info.get("full_name", None)
+        print(self.adapter_name)
 
     def _print_api_compatibility(self) -> None:
         """Print the API version"""
         logging.info(f"Connected to Zulip")
         logging.info(f"Adapter version {self.ADAPTER_VERSION}, using {self.TESTED_WITH_API}")
-        #logging.info(f"Zulip library version: {zulip.__version__}")
+        logging.info(f"Zulip library version: {zulip.__version__}")
 
     async def _monitor_connection(self) -> None:
         """Monitor connection to Zulip"""
@@ -102,8 +102,8 @@ class ZulipAdapter:
                 if not self.initialized or not self.running:
                     continue
 
-                me = None
-                if not me:
+                response = self.zulip_client.client.get_profile()
+                if not response or not response.get("result") == "success":
                     raise RuntimeError("Connection check failed - could not get user info")
 
                 await self.socketio_server.emit_event(
@@ -127,25 +127,22 @@ class ZulipAdapter:
 
         if self.monitoring_task:
             self.monitoring_task.cancel()
+        if self.zulip_client:
+            await self.zulip_client.disconnect()
 
-        try:
-            logging.info("Disconnected from Zulip")
-        except Exception as e:
-            logging.error(f"Error disconnecting from Zulip: {e}")
-
-        logging.info("Adapter stopped")
+        logging.info("Zulip adapter stopped")
         await self.socketio_server.emit_event(
             "disconnect", {"adapter_type": self.adapter_type}
         )
 
-    async def process_zulip_event(self, event_type: str, event: Any) -> None:
+    async def process_zulip_event(self, event: Any) -> None:
         """Process events from Zulip client
 
         Args:
             event_type: event type (new_message, edited_message, deleted_message, chat_action)
             event: Zulip event object
         """
-        for event_info in await self.zulip_events_processor.process_event(event_type, event):
+        for event_info in await self.zulip_events_processor.process_event(event):
             await self.socketio_server.emit_event("bot_request", event_info)
 
     async def process_socket_io_event(self, event_type: str, data: Any) -> bool:

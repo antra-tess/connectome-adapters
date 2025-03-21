@@ -6,8 +6,10 @@ import os
 from enum import Enum
 from typing import Dict, Any, List, Optional, Union
 
-from adapters.zulip_adapter.adapter.conversation_manager.conversation_manager import ConversationManager
 from adapters.zulip_adapter.adapter.attachment_loaders.uploader import Uploader
+from adapters.zulip_adapter.adapter.conversation_manager.conversation_manager import ConversationManager
+from adapters.zulip_adapter.adapter.zulip_client import ZulipClient
+
 from core.utils.config import Config
 
 class EventType(str, Enum):
@@ -21,14 +23,16 @@ class EventType(str, Enum):
 class SocketIoEventsProcessor:
     """Processes events from socket.io and sends them to Zulip"""
 
-    def __init__(self, config: Config, conversation_manager: ConversationManager):
+    def __init__(self, config: Config, client: ZulipClient, conversation_manager: ConversationManager):
         """Initialize the socket.io events processor
 
         Args:
             config: Config instance
+            client: Zulip client instance
             conversation_manager: Conversation manager for tracking message history
         """
         self.config = config
+        self.client = client
         self.conversation_manager = conversation_manager
         self.adapter_type = "zulip"
         self.uploader = Uploader(self.config)

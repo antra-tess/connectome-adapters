@@ -6,42 +6,45 @@ import os
 from enum import Enum
 from typing import List, Dict, Any, Optional, Union
 
-from core.utils.config import Config
-from adapters.zulip_adapter.adapter.conversation_manager.conversation_manager import ConversationManager
 from adapters.zulip_adapter.adapter.attachment_loaders.downloader import Downloader
+from adapters.zulip_adapter.adapter.conversation_manager.conversation_manager import ConversationManager
+from adapters.zulip_adapter.adapter.zulip_client import ZulipClient
+
+from core.utils.config import Config
 
 class EventType(str, Enum):
     """Event types supported by the ZulipEventsProcessor"""
-    NEW_MESSAGE = "new_message"
-    EDITED_MESSAGE = "edited_message"
-    DELETED_MESSAGE = "deleted_message"
-    CHAT_ACTION = "chat_action"
+    MESSAGE = "message"
+    UPDATE_MESSAGE = "update_message"
+    REACTION = "reaction"
 
 class ZulipEventsProcessor:
     """Zulip events processor"""
 
     def __init__(self,
                  config: Config,
+                 client: ZulipClient,
                  conversation_manager: ConversationManager,
                  adapter_name: str):
         """Initialize the Zulip events processor
 
         Args:
             config: Config instance
+            client: Zulip client instance
             conversation_manager: Conversation manager for tracking message history
             adapter_name: Name of the adapter (typically bot username)
         """
         self.config = config
+        self.client = client
         self.conversation_manager = conversation_manager
         self.adapter_name = adapter_name
         self.adapter_type = self.config.get_setting("adapter", "type")
         self.downloader = Downloader(self.config)
 
-    async def process_event(self, event_type: str, event: Any) -> List[Dict[str, Any]]:
+    async def process_event(self, event: Any) -> List[Dict[str, Any]]:
         """Process events from Zulip client
 
         Args:
-            event_type: Type of event (new_message, edited_message, deleted_message, chat_action)
             event: Zulip event object
 
         Returns:
@@ -49,26 +52,22 @@ class ZulipEventsProcessor:
         """
         try:
             event_handlers = {
-                EventType.NEW_MESSAGE: self._handle_new_message,
-                EventType.EDITED_MESSAGE: self._handle_edited_message,
-                EventType.DELETED_MESSAGE: self._handle_deleted_message,
-                EventType.CHAT_ACTION: self._handle_chat_action
+                EventType.MESSAGE: self._handle_message,
+                EventType.UPDATE_MESSAGE: self._handle_update_message,  
+                EventType.REACTION: self._handle_reaction
             }
 
-            print(event)
-            print()
-
-            handler = event_handlers.get(event_type)
+            handler = event_handlers.get(event["type"])
             if handler:
                 return await handler(event)
 
-            logging.debug(f"Unhandled event type: {event_type}")
+            logging.debug(f"Unhandled event type: {event['type']}")
             return []
         except Exception as e:
             logging.error(f"Error processing Zulip event: {e}", exc_info=True)
             return []
 
-    async def _handle_new_message(self, event: Any) -> List[Dict[str, Any]]:
+    async def _handle_message(self, event: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Handle a new message event from Zulip
 
         Args:
@@ -80,13 +79,28 @@ class ZulipEventsProcessor:
         events = []
 
         try:
-            pass
+            delta = await self.conversation_manager.add_to_conversation(
+                event.get("message", None), None
+            )
+
+            if delta:
+                if "conversation_started" in delta["updates"]:
+                    history = await self._fetch_conversation_history()
+                    events.append(await self._conversation_started_event_info(delta, history))
+                if "message_received" in delta["updates"]:
+                    events.append(await self._new_message_event_info(delta))
         except Exception as e:
             logging.error(f"Error handling new message: {e}", exc_info=True)
 
         return events
+    
+    async def _fetch_conversation_history(self) -> List[Dict[str, Any]]:
+        """Fetch conversation history"""
+        return []
 
-    async def _conversation_started_event_info(self, delta: Dict[str, Any]) -> Dict[str, Any]:
+    async def _conversation_started_event_info(self,
+                                               delta: Dict[str, Any],
+                                               history: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Create a conversation started event
 
         Args:
@@ -131,8 +145,8 @@ class ZulipEventsProcessor:
             }
         }
 
-    async def _handle_edited_message(self, event: Any) -> List[Dict[str, Any]]:
-        """Handle an edited message event from Zulip
+    async def _handle_update_message(self, event: Any) -> List[Dict[str, Any]]:
+        """Handle an update message event from Zulip
 
         Args:
             event: Zulip event object
@@ -143,7 +157,12 @@ class ZulipEventsProcessor:
         events = []
 
         try:
-            pass
+            delta = await self.conversation_manager.update_conversation(
+                "update_message", event
+            )
+
+            if delta and "message_edited" in delta["updates"]:
+                events.append(await self._edited_message_event_info(delta))
         except Exception as e:
             logging.error(f"Error handling edited message: {e}", exc_info=True)
 
@@ -170,6 +189,37 @@ class ZulipEventsProcessor:
             }
         }
 
+    async def _handle_reaction(self, event: Any) -> List[Dict[str, Any]]:
+        """Handle chat action events like user joins, leaves, or group migrations
+
+        Args:
+            event: Zulip event object
+
+        Returns:
+            List of events to emit (typically empty for this case)
+        """
+        events = []
+
+        try:
+            delta = await self.conversation_manager.update_conversation("reaction", event)
+
+            if delta:
+                if "reaction_added" in delta["updates"]:
+                    for reaction in delta["added_reactions"]:
+                        events.append(
+                            await self._reaction_update_event_info("reaction_added", delta, reaction)
+                        )
+
+                if "reaction_removed" in delta["updates"]:
+                    for reaction in delta["removed_reactions"]:
+                        events.append(
+                            await self._reaction_update_event_info("reaction_removed", delta, reaction)
+                        )
+        except Exception as e:
+            logging.error(f"Error handling edited message: {e}", exc_info=True)
+
+        return events
+
     async def _reaction_update_event_info(self,
                                           event_type: str,
                                           delta: Dict[str, Any],
@@ -191,81 +241,5 @@ class ZulipEventsProcessor:
                 "message_id": delta["message_id"],
                 "conversation_id": delta["conversation_id"],
                 "emoji": reaction
-            }
-        }
-
-    async def _handle_deleted_message(self, event: Any) -> List[Dict[str, Any]]:
-        """Handle a deleted message event from Zulip
-
-        Args:
-            event: Zulip event object
-
-        Returns:
-            List of events to emit
-        """
-        events = []
-
-        try:
-            pass
-        except Exception as e:
-            logging.error(f"Error handling deleted message: {e}", exc_info=True)
-
-        return events
-
-    async def _deleted_message_event_info(self,
-                                          message_id: Union[int, str],
-                                          conversation_id: Union[int, str]) -> Dict[str, Any]:
-        """Create a message deleted event
-
-        Args:
-            message_id: ID of the deleted message
-            conversation_id: ID of the conversation
-
-        Returns:
-            Formatted event dictionary
-        """
-        return {
-            "adapter_type": self.adapter_type,
-            "event_type": "message_deleted",
-            "data" : {
-                "message_id": str(message_id),
-                "conversation_id": str(conversation_id)
-            }
-        }
-
-    async def _handle_chat_action(self, event: Any) -> List[Dict[str, Any]]:
-        """Handle chat action events like user joins, leaves, or group migrations
-
-        Args:
-            event: Zulip event object
-
-        Returns:
-            List of events to emit (typically empty for this case)
-        """
-        try:
-            pass
-        except Exception as e:
-            logging.error(f"Error handling chat action: {e}", exc_info=True)
-
-        return []
-    
-    async def _pinned_status_change_event_info(self,
-                                               event_type: str,
-                                               delta: Dict[str, Any]) -> Dict[str, Any]:
-        """Create a pinned message status change event
-
-        Args:
-            event_type: Type of change (pinned/unpinned)
-            delta: Event change information
-
-        Returns:
-            Formatted event dictionary
-        """
-        return {
-            "adapter_type": self.adapter_type,
-            "event_type": event_type,
-            "data" : {
-                "message_id": delta["message_id"],
-                "conversation_id": delta["conversation_id"]
             }
         }

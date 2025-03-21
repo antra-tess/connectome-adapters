@@ -6,6 +6,9 @@ from adapters.zulip_adapter.adapter.conversation_manager.conversation_data_class
 from adapters.zulip_adapter.adapter.conversation_manager.conversation_manager import (
   ConversationManager, EventType
 )
+from adapters.zulip_adapter.adapter.conversation_manager.message_builder import MessageBuilder
+from adapters.zulip_adapter.adapter.conversation_manager.reaction_handler import ReactionHandler
+from adapters.zulip_adapter.adapter.conversation_manager.user_builder import UserBuilder
 
 __all__ = [
     "ConversationInfo",
@@ -14,5 +17,8 @@ __all__ = [
     "UserInfo",
     "ThreadInfo",
     "ConversationManager",
-    "EventType"
+    "EventType",
+    "MessageBuilder",
+    "ReactionHandler",
+    "UserBuilder"
 ]

@@ -15,7 +15,12 @@ def default_config_data():
     """Default config data available to all tests"""
     return {
         "adapter": {
-            "type": "zulip"
+            "type": "zulip",
+            "email": "your_email@example.com",
+            "api_key": "your_api_key",
+            "site": "your_site",
+            "retry_delay": 5,
+            "connection_check_interval": 300
         },
         "attachments": {
             "storage_dir": "test_attachments",
