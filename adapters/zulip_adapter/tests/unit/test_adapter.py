@@ -73,9 +73,9 @@ class TestZulipAdapter:
                     "core.cache.message_cache.MessageCache",
                     return_value=message_cache_mock
                 ):
-                    with patch('os.path.exists', return_value=False):
-                        with patch('os.makedirs'):
-                            with patch('os.listdir', return_value=[]):
+                    with patch("os.path.exists", return_value=False):
+                        with patch("os.makedirs"):
+                            with patch("os.listdir", return_value=[]):
                                 yield ZulipAdapter(patch_config, socketio_server_mock)
 
     class TestMonitorConnection:

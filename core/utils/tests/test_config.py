@@ -92,3 +92,22 @@ class TestConfig:
             """Test has_setting method"""
             config = config
             assert config.has_setting(category, key) is expected
+
+        def test_add_setting_success(self, config):
+            """Test successfully adding a new setting"""
+            assert not config.has_setting("adapter", "new_setting")
+
+            config.add_setting("adapter", "new_setting", "new_value")
+
+            assert config.has_setting("adapter", "new_setting")
+            assert config.get_setting("adapter", "new_setting") == "new_value"
+        
+        def test_add_existing_setting_raises_error(self, config):
+            """Test that adding an existing setting raises an error"""
+            with pytest.raises(ValueError):
+                config.add_setting("adapter", "token", "new_token")
+        
+        def test_add_setting_invalid_category_raises_error(self, config):
+            """Test that adding a setting to an invalid category raises an error"""
+            with pytest.raises(ValueError):
+                config.add_setting("non_existent_category", "key", "value")

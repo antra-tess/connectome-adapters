@@ -52,7 +52,7 @@ class TestZulipClient:
                 assert client._polling_task is None
 
                 mock_client_class.assert_called_once_with(
-                    email=patch_config.get_setting("adapter", "email"),
+                    email=patch_config.get_setting("adapter", "adapter_email"),
                     api_key=patch_config.get_setting("adapter", "api_key"),
                     site=patch_config.get_setting("adapter", "site")
                 )

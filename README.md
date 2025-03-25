@@ -1,4 +1,18 @@
-# Python Telegram adapter
+# Connectome Activity adapters
+
+See [main repository](https://github.com/antra-tess/connectome) for more information.
+
+### Chat
+* Zulip
+* Telegram
+* Discord
+* Twitter
+
+### General
+* Filesystem
+* WikiGraph
+* IDE
+* MCP Host
 
 ## Setup
 

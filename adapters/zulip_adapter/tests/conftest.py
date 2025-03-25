@@ -15,12 +15,15 @@ def default_config_data():
     """Default config data available to all tests"""
     return {
         "adapter": {
-            "type": "zulip",
-            "email": "your_email@example.com",
-            "api_key": "your_api_key",
-            "site": "your_site",
+            "adapter_type": "zulip",
+            "adapter_email": "adapter_email@example.com",
+            "adapter_name": "test_bot",
+            "api_key": "zulip_api_key",
+            "site": "https://zulip.example.com/",
             "retry_delay": 5,
-            "connection_check_interval": 300
+            "connection_check_interval": 300,
+            "max_message_length": 30,
+            "chunk_size": 8192
         },
         "attachments": {
             "storage_dir": "test_attachments",
@@ -28,7 +31,7 @@ def default_config_data():
             "max_total_attachments": 1000,
             "cleanup_interval_hours": 24,
             "large_file_threshold_mb": 5,
-            "max_file_size_mb": 2048
+            "max_file_size_mb": 25
         },
         "rate_limit": {
             "messages_per_second": 10,

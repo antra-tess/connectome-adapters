@@ -156,6 +156,27 @@ class MessageCache:
         except Exception as e:
             logging.error(f"Error in cache maintenance: {e}")
 
+    async def migrate_message(self,
+                              old_conversation_id: str,
+                              message_id: str,
+                              new_conversation_id: str) -> None:
+        """Handle migration of messages when a group becomes a supergroup
+
+        Args:
+            old_conversation_id: Old conversation ID
+            message_id: Message ID
+            new_conversation_id: New conversation ID
+        """
+        async with self._lock:
+            if old_conversation_id not in self.messages or message_id not in self.messages[old_conversation_id]:
+                return
+
+            if new_conversation_id not in self.messages:
+                self.messages[new_conversation_id] = {}
+
+            self.messages[new_conversation_id][message_id] = self.messages[old_conversation_id][message_id]
+            del self.messages[old_conversation_id][message_id]
+
     async def migrate_messages(self, old_conversation_id: str, new_conversation_id: str) -> None:
         """Handle migration of messages when a group becomes a supergroup
 

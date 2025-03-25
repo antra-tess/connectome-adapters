@@ -13,7 +13,7 @@ class ZulipClient:
         self.config = config
         self.process_event = process_zulip_event
         self.client = zulip.Client(
-            email=config.get_setting("adapter", "email"),
+            email=config.get_setting("adapter", "adapter_email"),
             api_key=config.get_setting("adapter", "api_key"),
             site=config.get_setting("adapter", "site")
         )

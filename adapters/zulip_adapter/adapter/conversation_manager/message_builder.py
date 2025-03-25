@@ -1,6 +1,8 @@
 from typing import Dict, Any, Optional
 from datetime import datetime
 
+from adapters.zulip_adapter.adapter.conversation_manager.conversation_data_classes import UserInfo, ThreadInfo
+
 class MessageBuilder:
     """Builds message objects from Telethon events"""
 
@@ -20,24 +22,27 @@ class MessageBuilder:
 
         return self
 
-    def with_sender_info(self, sender: Optional[Dict[str, Any]]) -> 'MessageBuilder':
+    def with_sender_info(self, sender: Optional[UserInfo]) -> 'MessageBuilder':
         """Add sender information"""
         if sender:
-            self.message_data["sender_id"] = sender.get("user_id")
-            self.message_data["sender_name"] = sender.get("display_name")
-            self.message_data["is_from_bot"] = sender.get("is_bot", False)
-        else:
-            self.message_data["is_from_bot"] = True
+            self.message_data["sender_id"] = sender.user_id
+            self.message_data["sender_name"] = sender.display_name
+            self.message_data["is_from_bot"] = sender.is_bot
 
-        return self
-
-    def with_thread_info(self, thread_id: Optional[str], message: Any) -> 'MessageBuilder':
-        """Add thread information"""
         return self
 
     def with_content(self, message: Any) -> 'MessageBuilder':
         """Add message content"""
         self.message_data["text"] = message.get("content", None)
+
+        return self
+    
+    def with_thread_info(self, thread_info: ThreadInfo) -> 'MessageBuilder':
+        """Add thread information"""
+        if thread_info:
+            self.message_data["thread_id"] = thread_info.thread_id
+            self.message_data["reply_to_message_id"] = thread_info.thread_id
+
         return self
 
     def build(self) -> Dict[str, Any]:

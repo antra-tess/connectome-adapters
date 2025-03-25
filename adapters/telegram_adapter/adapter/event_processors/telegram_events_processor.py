@@ -268,7 +268,8 @@ class TelegramEventsProcessor:
                 "message_id": delta["message_id"],
                 "conversation_id": delta["conversation_id"],
                 "new_text": delta["text"] if "text" in delta else '',
-                "timestamp": delta["timestamp"]
+                "timestamp": delta["timestamp"],
+                "attachments": []
             }
         }
 

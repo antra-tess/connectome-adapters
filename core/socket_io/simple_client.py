@@ -5,7 +5,7 @@ import logging
 from typing import Optional
 
 logging.basicConfig(level=logging.INFO)
-sio = socketio.AsyncClient()
+sio = socketio.AsyncClient(logger=True)
 
 @sio.event
 async def connect():
@@ -169,7 +169,7 @@ async def remove_reaction(conversation_id: str, message_id: str, emoji: str) -> 
         print(f"Error removing reaction: {e}")
 
 async def main():
-    server_url = "http://localhost:8080"
+    server_url = "http://127.0.0.1:8081"
     logging.info(f"Connecting to adapter at {server_url}")
 
     try:

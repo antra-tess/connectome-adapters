@@ -2,6 +2,8 @@ import os
 import yaml
 import logging
 
+from typing import Any
+
 logger = logging.getLogger("Config")
 
 class Config:
@@ -36,8 +38,21 @@ class Config:
                         setattr(self, category, config[category])
         else:
             raise FileNotFoundError("Config file not found")
+        
+    def add_setting(self, category: str, key: str, value: Any) -> None:
+        """Add a specific dynamic setting
 
-    def get_setting(self, category: str, key: str, default=None):
+        Args:
+            category: Configuration category
+            key: Setting key
+            value: Value to add
+        """
+        if getattr(self, category, None) and key not in getattr(self, category):
+            getattr(self, category)[key] = value
+        else:
+            raise ValueError(f"Invalid attempt to change configuration category: {category}")
+
+    def get_setting(self, category: str, key: str, default=None) -> Any:
         """Get a specific setting with support for nested keys (e.g., "test.foo")
 
         Args:

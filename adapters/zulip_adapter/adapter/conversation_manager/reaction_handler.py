@@ -77,15 +77,13 @@ class ReactionHandler:
         Returns:
             Updated delta object
         """
-        reaction = ReactionHandler.convert_emoji_code_to_symbol(message)
+        reaction = message.get("emoji", None) or ReactionHandler.convert_emoji_code_to_symbol(message)
 
         if message.get("op", None) == "add":
             ReactionHandler.add_reaction(cached_msg, reaction)
-            delta.added_reactions = [reaction]
-            delta.updates.append(UpdateType.REACTION_ADDED)
+            delta.added_reactions = [] if cached_msg.is_from_bot else [reaction]
         elif message.get("op", None) == "remove":
             ReactionHandler.remove_reaction(cached_msg, reaction)
-            delta.removed_reactions = [reaction]
-            delta.updates.append(UpdateType.REACTION_REMOVED)
+            delta.removed_reactions = [] if cached_msg.is_from_bot else [reaction]
 
         return delta

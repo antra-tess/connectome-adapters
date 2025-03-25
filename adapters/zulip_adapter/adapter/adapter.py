@@ -31,7 +31,6 @@ class ZulipAdapter:
         self.zulip_client = None
         self.running = False
         self.initialized = False
-        self.adapter_name = None
         self.zulip_events_processor = None
         self.monitoring_task = None
 
@@ -53,13 +52,12 @@ class ZulipAdapter:
 
                 self.zulip_events_processor = ZulipEventsProcessor(
                     self.config,
-                    self.zulip_client,
-                    self.conversation_manager,
-                    self.adapter_name
+                    self.zulip_client.client,
+                    self.conversation_manager
                 )
                 self.socket_io_events_processor = SocketIoEventsProcessor(
                     self.config,
-                    self.zulip_client,
+                    self.zulip_client.client,
                     self.conversation_manager
                 )
 
@@ -82,8 +80,8 @@ class ZulipAdapter:
     async def _get_adapter_info(self) -> None:
         """Get adapter information"""
         adapter_info = self.zulip_client.client.get_profile()
-        self.adapter_name = adapter_info.get("full_name", None)
-        print(self.adapter_name)
+        self.config.add_setting("adapter", "adapter_name", adapter_info.get("full_name", ""))
+        self.config.add_setting("adapter", "adapter_id", str(adapter_info.get("user_id", "")))
 
     def _print_api_compatibility(self) -> None:
         """Print the API version"""
@@ -142,6 +140,8 @@ class ZulipAdapter:
             event_type: event type (new_message, edited_message, deleted_message, chat_action)
             event: Zulip event object
         """
+        print(event)
+        print()
         for event_info in await self.zulip_events_processor.process_event(event):
             await self.socketio_server.emit_event("bot_request", event_info)
 
