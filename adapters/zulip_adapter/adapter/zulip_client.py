@@ -67,6 +67,7 @@ class ZulipClient:
                         await self.process_event(event)              
             except Exception as e:
                 logging.error(f"Error in polling loop: {e}")
+
                 if self.running:
                     await asyncio.sleep(5)  # Retry after delay
 
@@ -76,6 +77,7 @@ class ZulipClient:
 
         if self._polling_task and not self._polling_task.done():
             self._polling_task.cancel()
+
             try:
                 await self._polling_task
             except asyncio.CancelledError:
@@ -84,6 +86,7 @@ class ZulipClient:
         try:
             if self.queue_id:
                 result = self.client.delete_queue(self.queue_id)
+
                 if result.get("result", None) == "success":
                     logging.info(f"Successfully deleted Zulip event queue: {self.queue_id}")
                 else:

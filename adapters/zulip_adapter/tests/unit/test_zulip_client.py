@@ -8,7 +8,7 @@ class TestZulipClient:
     """Tests for ZulipClient"""
 
     @pytest.fixture
-    def zulip_client_mock(self):
+    def zulip_mock(self):
         """Create a mocked Zulip Client instance directly"""
         with patch("zulip.Client") as mock_client_class:
             mock_client = MagicMock()
@@ -27,10 +27,10 @@ class TestZulipClient:
             yield mock_client
 
     @pytest.fixture
-    def zulip_client(self, patch_config, zulip_client_mock):
+    def zulip_client(self, patch_config, zulip_mock):
         """Create a ZulipClient with mocked dependencies"""
         client = ZulipClient(patch_config, AsyncMock())
-        client.client = zulip_client_mock
+        client.client = zulip_mock
         yield client
 
     class TestInitialization:
@@ -61,12 +61,12 @@ class TestZulipClient:
         """Tests for connecting to Zulip"""
 
         @pytest.mark.asyncio
-        async def test_connect_success(self, zulip_client, zulip_client_mock):
+        async def test_connect_success(self, zulip_client, zulip_mock):
             """Test successful connection to Zulip"""
-            with patch.object(zulip_client, "client", zulip_client_mock):
+            with patch.object(zulip_client, "client", zulip_mock):
                 await zulip_client.connect()
                 
-                zulip_client_mock.register.assert_called_once_with(
+                zulip_mock.register.assert_called_once_with(
                     event_types=["message", "reaction", "update_message"]
                 )
                 
@@ -75,25 +75,25 @@ class TestZulipClient:
                 assert zulip_client.running is True
 
         @pytest.mark.asyncio
-        async def test_connect_failure_empty_result(self, zulip_client, zulip_client_mock):
+        async def test_connect_failure_empty_result(self, zulip_client, zulip_mock):
             """Test connecting with empty result"""
-            zulip_client_mock.register.return_value = None
+            zulip_mock.register.return_value = None
             
-            with patch.object(zulip_client, "client", zulip_client_mock):
+            with patch.object(zulip_client, "client", zulip_mock):
                 await zulip_client.connect()
                 
-                zulip_client_mock.register.assert_called_once()
+                zulip_mock.register.assert_called_once()
                 assert zulip_client.running is False
 
         @pytest.mark.asyncio
-        async def test_connect_exception(self, zulip_client, zulip_client_mock):
+        async def test_connect_exception(self, zulip_client, zulip_mock):
             """Test connecting with an exception"""
-            zulip_client_mock.register.side_effect = Exception("Test error")
+            zulip_mock.register.side_effect = Exception("Test error")
             
-            with patch.object(zulip_client, "client", zulip_client_mock):
+            with patch.object(zulip_client, "client", zulip_mock):
                 await zulip_client.connect()
                 
-                zulip_client_mock.register.assert_called_once()
+                zulip_mock.register.assert_called_once()
                 assert zulip_client.running is False
 
     class TestPolling:
@@ -110,7 +110,7 @@ class TestZulipClient:
 
         @pytest.mark.asyncio
         @pytest.mark.filterwarnings("ignore::RuntimeWarning")
-        async def test_polling_loop_processes_events(self, zulip_client, zulip_client_mock):
+        async def test_polling_loop_processes_events(self, zulip_client, zulip_mock):
             """Test that the polling loop processes events"""
             zulip_client.running = True
             zulip_client.queue_id = "test_queue_id"
@@ -133,7 +133,7 @@ class TestZulipClient:
             async def mock_process_event(event):
                 process_calls.append(event)
             
-            zulip_client_mock.get_events = MagicMock(side_effect=mock_get_events)
+            zulip_mock.get_events = MagicMock(side_effect=mock_get_events)
             zulip_client.process_event = mock_process_event
 
             try:
@@ -146,18 +146,19 @@ class TestZulipClient:
             assert zulip_client.last_event_id == 12346
 
         @pytest.mark.asyncio
-        async def test_polling_loop_handles_error(self, zulip_client, zulip_client_mock):
+        @pytest.mark.filterwarnings("ignore::RuntimeWarning")
+        async def test_polling_loop_handles_error(self, zulip_client, zulip_mock):
             """Test that the polling loop handles errors properly"""
             zulip_client.running = True
             zulip_client.queue_id = "test_queue_id"
             zulip_client.last_event_id = 12345
 
-            zulip_client_mock.get_events.side_effect = [
+            zulip_mock.get_events.side_effect = [
                 Exception("API error"),
                 asyncio.CancelledError()
             ]
             
-            with patch.object(zulip_client, "client", zulip_client_mock):
+            with patch.object(zulip_client, "client", zulip_mock):
                 with patch("asyncio.sleep") as sleep_mock:
                     with pytest.raises(asyncio.CancelledError):
                         await zulip_client._polling_loop()
@@ -168,16 +169,16 @@ class TestZulipClient:
 
         @pytest.mark.asyncio
         @pytest.mark.filterwarnings("ignore::RuntimeWarning")
-        async def test_disconnect(self, zulip_client, zulip_client_mock):
+        async def test_disconnect(self, zulip_client, zulip_mock):
             """Test disconnecting with an active polling task"""
             zulip_client.running = True
             zulip_client.queue_id = "test_queue_id"
             zulip_client._polling_task = AsyncMock()
             
-            with patch.object(zulip_client, "client", zulip_client_mock):
+            with patch.object(zulip_client, "client", zulip_mock):
                 await zulip_client.disconnect()
                 
                 assert zulip_client.running is False
-                zulip_client_mock.delete_queue.assert_called_once_with("test_queue_id")
+                zulip_mock.delete_queue.assert_called_once_with("test_queue_id")
                 assert zulip_client.queue_id is None
                 assert zulip_client.last_event_id is None

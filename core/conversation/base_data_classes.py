@@ -1,31 +1,40 @@
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Dict, Any, Optional, List, Set
+from typing import Dict, Any, Optional, List, Set, Union
 
-class UpdateType(str, Enum):
+class ConversationUpdateType(str, Enum):
     """Types of updates that can occur in a conversation"""
     CONVERSATION_STARTED = "conversation_started"
     MESSAGE_RECEIVED = "message_received"
     MESSAGE_EDITED = "message_edited"
-    MESSAGE_DELETED = "message_deleted"
     REACTION_ADDED = "reaction_added"
     REACTION_REMOVED = "reaction_removed"
+    MESSAGE_PINNED = "message_pinned"
+    MESSAGE_UNPINNED = "message_unpinned"
 
 @dataclass
 class UserInfo:
-    """Information about a Zulip user"""
+    """Information about a Telegram user"""
     user_id: str
     first_name: Optional[str] = None
     last_name: Optional[str] = None
     username: Optional[str] = None
+    email: Optional[str] = None
     is_bot: bool = False
+
+    @property
+    def mention(self) -> str:
+        """Get a mention string for the user"""
+        if self.username:
+            return f"@{self.username}"
+        return f"User {self.user_id}"
 
     @property
     def display_name(self) -> str:
         """Get a human-readable display name"""
         if self.username:
-            return self.username
+            return f"{self.username}"
 
         name_parts = []
         if self.first_name:
@@ -34,6 +43,9 @@ class UserInfo:
             name_parts.append(self.last_name)
         if name_parts:
             return " ".join(name_parts)
+        
+        if self.email:
+            return self.email
 
         return f"User {self.user_id}"
 
@@ -51,11 +63,12 @@ class ThreadInfo:
             self.last_activity = datetime.now()
 
 @dataclass
-class ConversationInfo:
-    """Comprehensive information about a Zulip conversation"""
+class BaseConversationInfo:
+    """Comprehensive information about a conversation"""
     # Core identifiers
     conversation_id: str
     conversation_type: str  # private, stream
+    conversation_name: Optional[str] = None
 
     # Activity tracking
     created_at: datetime = None  # When we first saw this chat
@@ -71,9 +84,6 @@ class ConversationInfo:
 
     # Add attachment tracking
     attachments: Set[str] = field(default_factory=set)
-
-    # Add message tracking
-    messages: Set[str] = field(default_factory=set)
 
     def __post_init__(self):
         if self.created_at is None:
@@ -95,7 +105,10 @@ class ConversationDelta:
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for API responses"""
-        result = {"conversation_id": self.conversation_id, "fetch_history": self.fetch_history}
+        result = {
+            "conversation_id": self.conversation_id,
+            "fetch_history": self.fetch_history
+        }
 
         if self.message_id:
             result["message_id"] = self.message_id

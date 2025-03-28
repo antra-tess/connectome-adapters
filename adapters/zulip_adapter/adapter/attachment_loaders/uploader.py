@@ -1,14 +1,17 @@
 import asyncio
 import logging
 import os
-import shutil
 import mimetypes
 import aiohttp
 
 from typing import Dict, Any, Optional
-from datetime import datetime
-
 from adapters.zulip_adapter.adapter.attachment_loaders.base_loader import BaseLoader
+from core.utils.attachment_loading import (
+    create_attachment_dir,
+    delete_empty_directory,
+    get_attachment_type_by_extension,
+    move_attachment
+)
 from core.utils.config import Config
 
 class Uploader(BaseLoader):
@@ -73,7 +76,6 @@ class Uploader(BaseLoader):
         try:
             async with aiohttp.ClientSession() as session:
                 with open(file_path, "rb") as f:
-                    print(f)
                     form_data = aiohttp.FormData()
                     form_data.add_field("file", f, filename=file_name, content_type=mime_type)
 
@@ -112,7 +114,7 @@ class Uploader(BaseLoader):
         file_extension = old_path.split(".")[-1]
 
         attachment_id = self._generate_attachment_id(zulip_uri)
-        attachment_type = self._get_attachment_type_by_extension(file_extension)
+        attachment_type = get_attachment_type_by_extension(file_extension)
 
         attachment_dir = os.path.join(
             self.download_dir, attachment_type, attachment_id
@@ -121,33 +123,6 @@ class Uploader(BaseLoader):
             attachment_dir, f"{attachment_id}.{file_extension}"
         )
 
-        self._create_attachment_dir(attachment_dir)
-        self._move_attachment(old_path, file_path)
-        self._delete_empty_directory(old_path)
-
-    def _move_attachment(self, src_path: str, dest_path: str) -> None:
-        """Move an attachment from one location to another
-        
-        Args:
-            src_path: Source path
-            dest_path: Destination path
-        """
-        try:
-            shutil.move(src_path, dest_path)
-        except Exception as e:
-            logging.error(f"Error moving file {src_path}: {e}")
-
-    def _delete_empty_directory(self, file_path: str) -> None:
-        """Check if a directory is empty and delete it if so
-        
-        Args:
-            file_path: File path
-        """
-        directory = os.path.dirname(file_path)
-
-        if os.path.exists(directory) and len(os.listdir(directory)) == 0:
-            try:
-                os.rmdir(directory)
-                logging.info(f"Removed directory: {directory}")
-            except Exception as e:
-                logging.error(f"Could not remove directory {directory}: {e}")
+        create_attachment_dir(attachment_dir)
+        move_attachment(old_path, file_path)
+        delete_empty_directory(old_path)

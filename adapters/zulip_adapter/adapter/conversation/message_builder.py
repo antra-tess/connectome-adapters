@@ -1,7 +1,7 @@
 from typing import Dict, Any, Optional
 from datetime import datetime
 
-from adapters.zulip_adapter.adapter.conversation_manager.conversation_data_classes import UserInfo, ThreadInfo
+from core.conversation.base_data_classes import UserInfo, ThreadInfo
 
 class MessageBuilder:
     """Builds message objects from Telethon events"""

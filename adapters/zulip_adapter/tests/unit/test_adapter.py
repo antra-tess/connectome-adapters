@@ -1,13 +1,14 @@
 import pytest
 import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch, call
+from unittest.mock import AsyncMock, MagicMock, patch
 
-from adapters.zulip_adapter.adapter.adapter import ZulipAdapter
-from adapters.zulip_adapter.adapter.event_processors.zulip_events_processor import ZulipEventsProcessor
-from adapters.zulip_adapter.adapter.event_processors.socket_io_events_processor import SocketIoEventsProcessor
+from adapters.zulip_adapter.adapter.adapter import Adapter
+from adapters.zulip_adapter.adapter.conversation.manager import Manager
+from core.cache.attachment_cache import AttachmentCache
+from core.cache.message_cache import MessageCache
 
-class TestZulipAdapter:
-    """Tests for the ZulipAdapter class"""
+class TestAdapter:
+    """Tests for the Adapter class"""
 
     @pytest.fixture
     def socketio_server_mock(self):
@@ -33,50 +34,22 @@ class TestZulipAdapter:
         return client
 
     @pytest.fixture
-    def zulip_events_processor_mock(self):
-        """Create a mocked ZulipEventsProcessor"""
-        processor = AsyncMock()
-        processor.process_event = AsyncMock(return_value=[{"test": "event"}])
-        return processor
-
-    @pytest.fixture
-    def socket_io_events_processor_mock(self):
-        """Create a mocked SocketIoEventsProcessor"""
-        processor = AsyncMock()
-        processor.process_event = AsyncMock(return_value=True)
-        return processor
-
-    @pytest.fixture
-    def conversation_manager_mock(self):
-        """Create a mocked ConversationManager"""
-        return MagicMock()
-
-    @pytest.fixture
     def adapter(self, socketio_server_mock, patch_config):
         """Create a ZulipAdapter with mocked dependencies"""
-        conversation_manager_mock = MagicMock()
+        manager_mock = MagicMock()
         attachment_cache_mock = MagicMock()
         message_cache_mock = MagicMock()
 
-        conversation_manager_mock.message_cache = message_cache_mock
-        conversation_manager_mock.attachment_cache = attachment_cache_mock
+        manager_mock.message_cache = message_cache_mock
+        manager_mock.attachment_cache = attachment_cache_mock
         
-        with patch(
-            "adapters.zulip_adapter.adapter.conversation_manager.conversation_manager.ConversationManager",
-            return_value=conversation_manager_mock
-        ):
-            with patch(
-                "core.cache.attachment_cache.AttachmentCache",
-                return_value=attachment_cache_mock
-            ):
-                with patch(
-                    "core.cache.message_cache.MessageCache",
-                    return_value=message_cache_mock
-                ):
+        with patch.object(Manager, "__new__", return_value=manager_mock):
+            with patch.object(AttachmentCache, "__new__", return_value=attachment_cache_mock):
+                with patch.object(MessageCache, "__new__", return_value=message_cache_mock):
                     with patch("os.path.exists", return_value=False):
                         with patch("os.makedirs"):
                             with patch("os.listdir", return_value=[]):
-                                yield ZulipAdapter(patch_config, socketio_server_mock)
+                                yield Adapter(patch_config, socketio_server_mock)
 
     class TestMonitorConnection:
         """Tests for the connection monitoring"""
@@ -87,7 +60,7 @@ class TestZulipAdapter:
             """Test successful connection check"""
             adapter.running = True
             adapter.initialized = True
-            adapter.zulip_client = zulip_client_mock
+            adapter.client = zulip_client_mock
 
             with patch("asyncio.sleep", side_effect=[None, asyncio.CancelledError()]):
                 try:
@@ -104,7 +77,7 @@ class TestZulipAdapter:
             """Test connection check failure"""
             adapter.running = True
             adapter.initialized = True
-            adapter.zulip_client = zulip_client_mock
+            adapter.client = zulip_client_mock
             zulip_client_mock.client.get_profile.return_value = {"result": "error"}
 
             with patch("asyncio.sleep", side_effect=[None, asyncio.CancelledError()]):
@@ -120,30 +93,39 @@ class TestZulipAdapter:
     class TestEventProcessing:
         """Tests for event processing"""
 
+        @pytest.fixture
+        def events_processor_mock(self):
+            """Create a mocked events processor"""
+            def _create(return_value):
+                processor = AsyncMock()
+                processor.process_event = AsyncMock(return_value=return_value)
+                return processor
+            return _create
+
         @pytest.mark.asyncio
-        async def test_process_zulip_event(self, adapter, zulip_events_processor_mock):
+        async def test_process_zulip_event(self, adapter, events_processor_mock):
             """Test processing Zulip events"""
-            adapter.zulip_events_processor = zulip_events_processor_mock
+            adapter.incoming_events_processor = events_processor_mock([{"test": "event"}])
             test_event = {"type": "message", "data": "test_data"}
 
-            await adapter.process_zulip_event(test_event)
+            await adapter.process_incoming_event(test_event)
 
-            zulip_events_processor_mock.process_event.assert_called_once_with(test_event)
+            adapter.incoming_events_processor.process_event.assert_called_once_with(test_event)
             adapter.socketio_server.emit_event.assert_called_once_with("bot_request", {"test": "event"})
 
         @pytest.mark.asyncio
-        async def test_process_socket_io_event(self, adapter, socket_io_events_processor_mock):
+        async def test_process_socket_io_event(self, adapter, events_processor_mock):
             """Test processing Socket.IO events"""
-            adapter.socket_io_events_processor = socket_io_events_processor_mock
-            adapter.zulip_client = MagicMock()
+            adapter.outgoing_events_processor = events_processor_mock(True)
+            adapter.client = MagicMock()
             test_data = {"test": "socket_data"}
 
-            assert await adapter.process_socket_io_event("send_message", test_data) is True
-            socket_io_events_processor_mock.process_event.assert_called_once_with("send_message", test_data)
+            assert await adapter.process_outgoing_event("send_message", test_data) is True
+            adapter.outgoing_events_processor.process_event.assert_called_once_with("send_message", test_data)
 
         @pytest.mark.asyncio
         async def test_process_socket_io_event_not_connected(self, adapter):
             """Test processing Socket.IO events when not connected"""
-            adapter.zulip_client = None
+            adapter.client = None
 
-            assert await adapter.process_socket_io_event("send_message", {"test": "socket_data"}) is False
+            assert await adapter.process_outgoing_event("send_message", {"test": "socket_data"}) is False

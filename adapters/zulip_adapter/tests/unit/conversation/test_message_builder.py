@@ -1,9 +1,7 @@
 import pytest
-from unittest.mock import MagicMock
-from datetime import datetime
 
-from adapters.zulip_adapter.adapter.conversation_manager.message_builder import MessageBuilder
-from adapters.zulip_adapter.adapter.conversation_manager.conversation_data_classes import UserInfo
+from adapters.zulip_adapter.adapter.conversation.message_builder import MessageBuilder
+from core.conversation.base_data_classes import UserInfo
 
 class TestMessageBuilder:
     """Tests for the MessageBuilder class with Zulip messages"""

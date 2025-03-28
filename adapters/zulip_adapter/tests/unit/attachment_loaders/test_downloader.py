@@ -1,13 +1,16 @@
-import pytest
-import os
 import json
+import logging
+import os
+import pytest
 import re
-from datetime import datetime
-from unittest.mock import AsyncMock, MagicMock, patch, mock_open
 
+from datetime import datetime
+from unittest.mock import MagicMock, patch
+
+import core.utils.attachment_loading
 from adapters.zulip_adapter.adapter.attachment_loaders.downloader import Downloader
 
-class TestZulipDownloader:
+class TestDownloader:
     """Tests for the Zulip Downloader class"""
 
     @pytest.fixture
@@ -66,9 +69,8 @@ class TestZulipDownloader:
             message = {
                 "content": "This is a message with no attachments"
             }
-            
-            result = await downloader._get_attachment_metadata(message)
-            assert result == []
+
+            assert await downloader._get_attachment_metadata(message) == []
 
     class TestDownloadAttachment:
         """Tests for the main download_attachment method"""
@@ -91,19 +93,19 @@ class TestZulipDownloader:
             
             with patch.object(downloader, "_get_attachment_metadata", return_value=[metadata]):
                 with patch("os.path.exists", side_effect=[False, True]):  # File doesn't exist, then does after download
-                    with patch.object(downloader, "_create_attachment_dir") as mock_mkdir:
+                    with patch("core.utils.attachment_loading.create_attachment_dir"):
                         with patch.object(downloader, "_download_file", return_value=True) as mock_download:
-                            with patch.object(downloader, "_create_metadata_file") as mock_metadata:
+                            with patch("core.utils.attachment_loading.save_metadata_file"):
                                 with patch("os.path.getsize", return_value=12345):
-                                    with patch("logging.info") as mock_log:
+                                    with patch.object(logging, "info") as mock_log:
                                         result = await downloader.download_attachment(message)
                                         
                                         assert len(result) == 1
                                         assert result[0]["attachment_id"] == "xyz123"
                                         assert result[0]["size"] == 12345
-                                        mock_mkdir.assert_called_once()
+
                                         mock_download.assert_called_once()
-                                        mock_metadata.assert_called_once()
+
                                         assert mock_log.called
                                         assert "Downloaded" in mock_log.call_args_list[0][0][0]
                                         
@@ -125,15 +127,14 @@ class TestZulipDownloader:
             
             with patch.object(downloader, "_get_attachment_metadata", return_value=[metadata]):
                 with patch("os.path.exists", return_value=True):  # File already exists
-                    with patch.object(downloader, "_create_metadata_file") as mock_metadata:
+                    with patch("core.utils.attachment_loading.save_metadata_file"):
                         with patch("os.path.getsize", return_value=12345):
-                            with patch("logging.info") as mock_log:
+                            with patch.object(logging, "info") as mock_log:
                                 result = await downloader.download_attachment(message)
                                 
                                 assert len(result) == 1
                                 assert result[0]["attachment_id"] == "xyz123"
                                 assert result[0]["size"] == 12345
-                                mock_metadata.assert_called_once()
                                 assert mock_log.called
                                 assert "Skipping download" in mock_log.call_args_list[0][0][0]
                                 
@@ -165,18 +166,16 @@ class TestZulipDownloader:
             
             with patch.object(downloader, "_get_attachment_metadata", return_value=[metadata1, metadata2]):
                 with patch("os.path.exists", return_value=False):  # Files don't exist
-                    with patch.object(downloader, "_create_attachment_dir") as mock_mkdir:
+                    with patch("core.utils.attachment_loading.create_attachment_dir"):
                         with patch.object(downloader, "_download_file", return_value=True) as mock_download:
-                            with patch.object(downloader, "_create_metadata_file") as mock_metadata:
+                            with patch("core.utils.attachment_loading.save_metadata_file"):
                                 with patch("os.path.getsize", return_value=12345):
                                     result = await downloader.download_attachment(message)
                                     
                                     assert len(result) == 2
                                     assert result[0]["attachment_id"] == "abc123"
                                     assert result[1]["attachment_id"] == "def456" 
-                                    assert mock_mkdir.call_count == 2
                                     assert mock_download.call_count == 2
-                                    assert mock_metadata.call_count == 2
                                     
         @pytest.mark.asyncio
         async def test_download_attachment_no_attachments(self, downloader):

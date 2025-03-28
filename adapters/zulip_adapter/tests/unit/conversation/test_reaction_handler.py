@@ -1,11 +1,9 @@
 import pytest
 from unittest.mock import MagicMock, patch
 
+from adapters.zulip_adapter.adapter.conversation.reaction_handler import ReactionHandler
 from core.cache.message_cache import CachedMessage
-from adapters.zulip_adapter.adapter.conversation_manager.conversation_data_classes import (
-    ConversationDelta, UpdateType
-)
-from adapters.zulip_adapter.adapter.conversation_manager.reaction_handler import ReactionHandler
+from core.conversation.base_data_classes import ConversationDelta
 
 class TestReactionHandler:
     """Tests for the Zulip ReactionHandler class"""

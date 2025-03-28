@@ -23,7 +23,8 @@ def default_config_data():
             "retry_delay": 5,
             "connection_check_interval": 300,
             "max_message_length": 30,
-            "chunk_size": 8192
+            "chunk_size": 8192,
+            "max_history_limit": 100
         },
         "attachments": {
             "storage_dir": "test_attachments",

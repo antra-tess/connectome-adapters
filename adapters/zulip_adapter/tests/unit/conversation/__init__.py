@@ -1,10 +1,11 @@
 """
-Unit tests for the conversation manager components.
+Unit tests for the Zulip conversation manager components.
 
 This package contains unit tests for:
-- ConversationManager: For tracking conversation state
+- Manager: For tracking conversation state
 - MessageBuilder: For building message information
 - ReactionHandler: For handling reactions
+- ThreadHandler: For handling threads
 - UserBuilder: For building user information
 """
 

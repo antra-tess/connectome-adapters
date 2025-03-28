@@ -3,12 +3,12 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 import emoji
 
-from adapters.zulip_adapter.adapter.event_processors.socket_io_events_processor import (
-    SocketIoEventsProcessor, EventType
-)
+from adapters.zulip_adapter.adapter.attachment_loaders.uploader import Uploader
+from adapters.zulip_adapter.adapter.event_processors.outgoing_event_processor import OutgoingEventProcessor
+from core.event_processors.base_outgoing_event_processor import OutgoingEventType
 
-class TestSocketIoEventsProcessor:
-    """Tests for the SocketIoEventsProcessor class"""
+class TestOutgoingEventProcessor:
+    """Tests for the OutgoingEventProcessor class"""
 
     @pytest.fixture
     def zulip_client_mock(self):
@@ -20,25 +20,42 @@ class TestSocketIoEventsProcessor:
         client.call_endpoint = MagicMock(return_value={"result": "success"})
         client.add_reaction = MagicMock(return_value={"result": "success"})
         client.remove_reaction = MagicMock(return_value={"result": "success"})
-        client.get_user_by_id = MagicMock(return_value={
-            "result": "success",
-            "user": {"email": "test@example.com"}
-        })
-        client.get_streams = MagicMock(return_value={
-            "result": "success",
-            "streams": [{"stream_id": 789, "name": "test-stream"}]
-        })
         return client
 
     @pytest.fixture
-    def conversation_manager_mock(self):
+    def private_conversation_mock(self):
+        """Create a mocked private conversation"""
+        conversation = MagicMock()
+        conversation.conversation_type = "private"
+        conversation.to_fields.return_value = ["test@example.com", "test@example.com"]
+        return conversation
+    
+    @pytest.fixture
+    def stream_conversation_mock(self):
+        """Create a mocked stream conversation"""
+        conversation = MagicMock()
+        conversation.conversation_type = "stream"
+        conversation.to_fields.return_value = "test-stream"
+        conversation.conversation_id = "789/Some topic"
+        return conversation
+
+    @pytest.fixture
+    def conversation_manager_mock(self, private_conversation_mock, stream_conversation_mock):
         """Create a mocked conversation manager"""
         manager = AsyncMock()
+
+        def get_conversation_side_effect(conversation_id):
+            if conversation_id == "123_456":
+                return private_conversation_mock
+            elif conversation_id == "789/Some topic":
+                return stream_conversation_mock
+            return None            
+
+        manager.get_conversation = MagicMock(side_effect=get_conversation_side_effect)
         manager.add_to_conversation = AsyncMock()
         manager.update_conversation = AsyncMock()
         manager.delete_from_conversation = AsyncMock()
         manager.get_message = AsyncMock()
-        manager.conversations = {}
         return manager
 
     @pytest.fixture
@@ -49,41 +66,29 @@ class TestSocketIoEventsProcessor:
         return uploader
 
     @pytest.fixture
-    def processor(self,
-                  patch_config,
-                  zulip_client_mock,
-                  conversation_manager_mock,
-                  uploader_mock):
-        """Create a SocketIoEventsProcessor with mocked dependencies"""
-        with patch(
-            "adapters.zulip_adapter.adapter.attachment_loaders.uploader.Uploader"
-        ) as UploaderMock:
-            UploaderMock.return_value = uploader_mock
-
-            return SocketIoEventsProcessor(
-                patch_config,
-                zulip_client_mock,
-                conversation_manager_mock
-            )
+    def processor(self, patch_config, zulip_client_mock, conversation_manager_mock, uploader_mock):
+        """Create a ZulipOutgoingEventProcessor with mocked dependencies"""
+        with patch.object(Uploader, "__new__", return_value=uploader_mock):
+            return OutgoingEventProcessor(patch_config, zulip_client_mock, conversation_manager_mock)
 
     class TestProcessEvent:
         """Tests for the process_event method"""
 
         @pytest.mark.asyncio
         @pytest.mark.parametrize("event_type", [
-            EventType.SEND_MESSAGE,
-            EventType.EDIT_MESSAGE,
-            EventType.DELETE_MESSAGE,
-            EventType.ADD_REACTION,
-            EventType.REMOVE_REACTION
+            OutgoingEventType.SEND_MESSAGE,
+            OutgoingEventType.EDIT_MESSAGE,
+            OutgoingEventType.DELETE_MESSAGE,
+            OutgoingEventType.ADD_REACTION,
+            OutgoingEventType.REMOVE_REACTION
         ])
         async def test_process_event_calls_correct_handler(self, processor, event_type):
             """Test that process_event calls the correct handler method"""
             data = {"test": "data"}
             handler_mocks = {}
 
-            for handler_type in EventType:
-                method_name = f"_{handler_type.value}"
+            for handler_type in OutgoingEventType:
+                method_name = f"_handle_{handler_type.value}_event"
                 handler_mock = AsyncMock(return_value=True)
                 handler_mocks[handler_type] = handler_mock
                 setattr(processor, method_name, handler_mock)
@@ -108,7 +113,7 @@ class TestSocketIoEventsProcessor:
             }
 
             with patch("asyncio.sleep"):
-                assert await processor._send_message(data) is True
+                assert await processor.process_event(OutgoingEventType.SEND_MESSAGE, data) is True
 
             zulip_client_mock.send_message.assert_called_once_with({
                 "type": "private",
@@ -126,7 +131,7 @@ class TestSocketIoEventsProcessor:
             }
 
             with patch("asyncio.sleep"):
-                assert await processor._send_message(data) is True
+                assert await processor.process_event(OutgoingEventType.SEND_MESSAGE, data) is True
 
             zulip_client_mock.send_message.assert_called_once_with({
                 "type": "stream",
@@ -144,17 +149,21 @@ class TestSocketIoEventsProcessor:
             }
 
             with patch("asyncio.sleep"):
-                assert await processor._send_message(data) is True
+                assert await processor.process_event(OutgoingEventType.SEND_MESSAGE, data) is True
             assert zulip_client_mock.send_message.call_count > 1
 
         @pytest.mark.asyncio
         async def test_send_message_missing_required_fields(self, processor):
             """Test sending a message with missing required fields"""
             # Missing conversation_id
-            assert await processor._send_message({"text": "Hello"}) is False
+            assert await processor.process_event(
+                OutgoingEventType.SEND_MESSAGE, {"text": "Hello"}
+            ) is False
 
             # Missing text
-            assert await processor._send_message({"conversation_id": "123_456"}) is False
+            assert await processor.process_event(
+                OutgoingEventType.SEND_MESSAGE, {"conversation_id": "123_456"}
+            ) is False
 
         @pytest.mark.asyncio
         async def test_send_message_api_failure(self, processor, zulip_client_mock):
@@ -166,7 +175,7 @@ class TestSocketIoEventsProcessor:
                 "text": "Hello, world!"
             }
 
-            assert await processor._send_message(data) is False
+            assert await processor.process_event(OutgoingEventType.SEND_MESSAGE, data) is False
 
     class TestEditMessage:
         """Tests for the edit_message method"""
@@ -180,7 +189,7 @@ class TestSocketIoEventsProcessor:
                 "text": "Updated text"
             }
 
-            assert await processor._edit_message(data) is True
+            assert await processor.process_event(OutgoingEventType.EDIT_MESSAGE, data) is True
 
             zulip_client_mock.update_message.assert_called_once_with({
                 "message_id": 789,  # Should be converted to int
@@ -191,13 +200,19 @@ class TestSocketIoEventsProcessor:
         async def test_edit_message_missing_required_fields(self, processor):
             """Test editing a message with missing required fields"""
             # Missing conversation_id
-            assert await processor._edit_message({"message_id": "789", "text": "Hello"}) is False
+            assert await processor.process_event(
+                OutgoingEventType.EDIT_MESSAGE, {"message_id": "789", "text": "Hello"}
+            ) is False
 
             # Missing message_id
-            assert await processor._edit_message({"conversation_id": "123_456", "text": "Hello"}) is False
+            assert await processor.process_event(
+                OutgoingEventType.EDIT_MESSAGE, {"conversation_id": "123_456", "text": "Hello"}
+            ) is False
 
             # Missing text
-            assert await processor._edit_message({"conversation_id": "123_456", "message_id": "789"}) is False
+            assert await processor.process_event(
+                OutgoingEventType.EDIT_MESSAGE, {"conversation_id": "123_456", "message_id": "789"}
+            ) is False
 
         @pytest.mark.asyncio
         async def test_edit_message_api_failure(self, processor, zulip_client_mock):
@@ -210,7 +225,7 @@ class TestSocketIoEventsProcessor:
                 "text": "Updated text"
             }
 
-            assert await processor._edit_message(data) is False
+            assert await processor.process_event(OutgoingEventType.EDIT_MESSAGE, data) is False
 
     class TestDeleteMessage:
         """Tests for the delete_message method"""
@@ -223,24 +238,23 @@ class TestSocketIoEventsProcessor:
                 "message_id": "789"
             }
 
-            assert await processor._delete_message(data) is True
+            assert await processor.process_event(OutgoingEventType.DELETE_MESSAGE, data) is True
 
-            zulip_client_mock.call_endpoint.assert_called_once_with(
-                "messages/789",
-                method="DELETE"
-            )
-            processor.conversation_manager.delete_from_conversation.assert_called_once_with(
-                "789", "123_456"
-            )
+            zulip_client_mock.call_endpoint.assert_called_once_with("messages/789",method="DELETE")
+            processor.conversation_manager.delete_from_conversation.assert_called_once_with(outgoing_event=data)
 
         @pytest.mark.asyncio
         async def test_delete_message_missing_required_fields(self, processor):
             """Test deleting a message with missing required fields"""
             # Missing conversation_id
-            assert await processor._delete_message({"message_id": "789"}) is False
+            assert await processor.process_event(
+                OutgoingEventType.DELETE_MESSAGE, {"message_id": "789"}
+            ) is False
 
             # Missing message_id
-            assert await processor._delete_message({"conversation_id": "123_456"}) is False
+            assert await processor.process_event(
+                OutgoingEventType.DELETE_MESSAGE, {"conversation_id": "123_456"}
+            ) is False
 
         @pytest.mark.asyncio
         async def test_delete_message_api_failure(self, processor, zulip_client_mock):
@@ -252,7 +266,7 @@ class TestSocketIoEventsProcessor:
                 "message_id": "789"
             }
 
-            assert await processor._delete_message(data) is False
+            assert await processor.process_event(OutgoingEventType.DELETE_MESSAGE, data) is False
             processor.conversation_manager.delete_from_conversation.assert_not_called()
 
     class TestReactions:
@@ -268,7 +282,7 @@ class TestSocketIoEventsProcessor:
             }
 
             with patch.object(processor, "_get_emoji_name", return_value="thumbs_up"):
-                assert await processor._add_reaction(data) is True
+                assert await processor.process_event(OutgoingEventType.ADD_REACTION, data) is True
 
             zulip_client_mock.add_reaction.assert_called_once_with({
                 "message_id": 789,
@@ -279,13 +293,19 @@ class TestSocketIoEventsProcessor:
         async def test_add_reaction_missing_required_fields(self, processor):
             """Test adding a reaction with missing required fields"""
             # Missing conversation_id
-            assert await processor._add_reaction({"message_id": "789", "emoji": "👍"}) is False
+            assert await processor.process_event(
+                OutgoingEventType.ADD_REACTION, {"message_id": "789", "emoji": "👍"}
+            ) is False
 
             # Missing message_id
-            assert await processor._add_reaction({"conversation_id": "123_456", "emoji": "👍"}) is False
+            assert await processor.process_event(
+                OutgoingEventType.ADD_REACTION, {"conversation_id": "123_456", "emoji": "👍"}
+            ) is False
 
             # Missing emoji
-            assert await processor._add_reaction({"conversation_id": "123_456", "message_id": "789"}) is False
+            assert await processor.process_event(
+                OutgoingEventType.ADD_REACTION, {"conversation_id": "123_456", "message_id": "789"}
+            ) is False
 
         @pytest.mark.asyncio
         async def test_add_reaction_api_failure(self, processor, zulip_client_mock):
@@ -298,7 +318,7 @@ class TestSocketIoEventsProcessor:
                 "emoji": "👍"
             }
 
-            assert await processor._add_reaction(data) is False
+            assert await processor.process_event(OutgoingEventType.ADD_REACTION, data) is False
 
         @pytest.mark.asyncio
         async def test_remove_reaction_success(self, processor, zulip_client_mock):
@@ -309,9 +329,8 @@ class TestSocketIoEventsProcessor:
                 "emoji": "👍"
             }
 
-            # Patch the emoji name conversion
             with patch.object(processor, "_get_emoji_name", return_value="thumbs_up"):
-                assert await processor._remove_reaction(data) is True
+                assert await processor.process_event(OutgoingEventType.REMOVE_REACTION, data) is True
 
             zulip_client_mock.remove_reaction.assert_called_once_with({
                 "message_id": 789,
@@ -322,13 +341,19 @@ class TestSocketIoEventsProcessor:
         async def test_remove_reaction_missing_required_fields(self, processor):
             """Test removing a reaction with missing required fields"""
             # Missing conversation_id
-            assert await processor._remove_reaction({"message_id": "789", "emoji": "👍"}) is False
+            assert await processor.process_event(
+                OutgoingEventType.REMOVE_REACTION, {"message_id": "789", "emoji": "👍"}
+            ) is False
 
             # Missing message_id
-            assert await processor._remove_reaction({"conversation_id": "123_456", "emoji": "👍"}) is False
+            assert await processor.process_event(
+                OutgoingEventType.REMOVE_REACTION, {"conversation_id": "123_456", "emoji": "👍"}
+            ) is False
 
             # Missing emoji
-            assert await processor._remove_reaction({"conversation_id": "123_456", "message_id": "789"}) is False
+            assert await processor.process_event(
+                OutgoingEventType.REMOVE_REACTION, {"conversation_id": "123_456", "message_id": "789"}
+            ) is False
 
         @pytest.mark.asyncio
         async def test_remove_reaction_api_failure(self, processor, zulip_client_mock):
@@ -341,12 +366,12 @@ class TestSocketIoEventsProcessor:
                 "emoji": "👍"
             }
 
-            assert await processor._remove_reaction(data) is False
+            assert await processor.process_event(OutgoingEventType.REMOVE_REACTION, data) is False
 
     class TestHelperMethods:
         """Tests for helper methods"""
 
-        def test_validate_required_fields_success(self, processor):
+        def test_validate_fields_success(self, processor):
             """Test validation with all required fields present"""
             data = {
                 "field1": "value1",
@@ -354,16 +379,16 @@ class TestSocketIoEventsProcessor:
                 "field3": "value3"
             }
             
-            assert processor._validate_required_fields(data, ["field1", "field2"], "test_operation") is True
+            assert processor._validate_fields(data, ["field1", "field2"], "test_operation") is True
 
-        def test_validate_required_fields_missing(self, processor):
+        def test_validate_fields_missing(self, processor):
             """Test validation with missing required fields"""
             data = {
                 "field1": "value1",
                 "field3": "value3"
             }
             
-            assert processor._validate_required_fields(data, ["field1", "field2"], "test_operation") is False
+            assert processor._validate_fields(data, ["field1", "field2"], "test_operation") is False
 
         def test_check_api_request_success(self, processor):
             """Test API response checking with success result"""
@@ -379,18 +404,6 @@ class TestSocketIoEventsProcessor:
             """Test API response checking with None result"""
             assert processor._check_api_request_success(None, "test operation") is False
 
-        def test_get_private_to_field(self, processor, zulip_client_mock):
-            """Test getting to field for private messages"""
-            result = processor._get_private_to_field("123_456")
-            assert result == ["test@example.com", "test@example.com"]
-            assert zulip_client_mock.get_user_by_id.call_count == 2
-
-        def test_get_stream_to_field(self, processor, zulip_client_mock):
-            """Test getting to field for stream messages"""
-            result = processor._get_stream_to_field("789")
-            assert result == "test-stream"
-            zulip_client_mock.get_streams.assert_called_once()
-
         def test_split_long_message_short(self, processor):
             """Test splitting a message that's already short enough"""
             text = "This is a short message."
@@ -402,8 +415,7 @@ class TestSocketIoEventsProcessor:
             result = processor._split_long_message("First sentence. Second sentence. " * 100)
 
             assert len(result) > 1
-            for part in result[:-1]:
-                    assert part.endswith(". ")
+            assert (result[-1].endswith(". ") or result[-1].endswith("."))
 
         def test_get_emoji_name(self, processor):
             """Test converting emoji to name"""

@@ -10,6 +10,11 @@ from datetime import datetime
 from typing import Any, Dict, List
 
 from adapters.zulip_adapter.adapter.attachment_loaders.base_loader import BaseLoader
+from core.utils.attachment_loading import (
+    create_attachment_dir,
+    get_attachment_type_by_extension,    
+    save_metadata_file
+)
 from core.utils.config import Config
 
 class Downloader(BaseLoader):
@@ -53,7 +58,7 @@ class Downloader(BaseLoader):
             
             if not os.path.exists(file_path):
                 try:
-                    self._create_attachment_dir(attachment_dir)
+                    create_attachment_dir(attachment_dir)
                     if await self._download_file(metadata, file_path):
                         logging.info(f"Downloaded {metadata['attachment_type']} to {file_path}")
                     else:
@@ -64,7 +69,7 @@ class Downloader(BaseLoader):
             else:
                 logging.info(f"Skipping download for {file_path} because it already exists")
 
-            self._create_metadata_file(metadata, attachment_dir)
+            save_metadata_file(metadata, attachment_dir)
             metadata["size"] = os.path.getsize(file_path)
             result_metadata.append(metadata)
 
@@ -98,7 +103,7 @@ class Downloader(BaseLoader):
 
             attachment_id = self._generate_attachment_id(file_path)
             metadata = {
-                "attachment_type": self._get_attachment_type_by_extension(file_extension),
+                "attachment_type": get_attachment_type_by_extension(file_extension),
                 "attachment_id": attachment_id,
                 "file_name": filename,
                 "file_extension": file_extension,

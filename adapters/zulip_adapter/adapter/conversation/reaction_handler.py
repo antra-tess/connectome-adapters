@@ -3,7 +3,7 @@ import emoji
 from typing import Dict, Any
 
 from core.cache.message_cache import CachedMessage
-from adapters.zulip_adapter.adapter.conversation_manager.conversation_data_classes import ConversationDelta, UpdateType
+from core.conversation.base_data_classes import ConversationDelta
 
 class ReactionHandler:
     """Handles message reactions"""
