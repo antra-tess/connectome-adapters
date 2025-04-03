@@ -53,8 +53,8 @@ class UserBuilder:
 
     @staticmethod
     async def add_user_info_to_conversation(config: Config,
-                                      message: Dict[str, Any],
-                                      conversation_info: ConversationInfo) -> Optional[UserInfo]:
+                                            message: Dict[str, Any],
+                                            conversation_info: ConversationInfo) -> Optional[UserInfo]:
         """Add user info to conversation info
 
         Args:

@@ -146,7 +146,11 @@ class BaseManager(ABC):
                     await self.message_cache.delete_message(
                         conversation_info.conversation_id, msg_id
                     )
+
+                    if hasattr(conversation_info, "pinned_messages"):
+                        conversation_info.pinned_messages.discard(msg_id)
                     conversation_info.message_count -= 1
+
                     delta.deleted_message_ids.append(msg_id)
 
             return delta.to_dict()
