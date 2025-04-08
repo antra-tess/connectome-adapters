@@ -64,7 +64,6 @@ class BaseManager(ABC):
 
             result.append(msg_dict)
 
-        result.sort(key=lambda x: x["timestamp"])
         return result
 
     async def add_to_conversation(self, event: Dict[str, Any]) -> Dict[str, Any]:
@@ -179,6 +178,11 @@ class BaseManager(ABC):
                     await self.message_cache.delete_message(
                         conversation_info.conversation_id, msg_id
                     )
+
+                    if hasattr(conversation_info, "messages"):
+                        conversation_info.messages.discard(msg_id)
+                    if hasattr(conversation_info, "pinned_messages"):
+                        conversation_info.pinned_messages.discard(msg_id)
 
             return delta.to_dict()
 

@@ -13,6 +13,18 @@ class ThreadHandler(BaseThreadHandler):
     def __init__(self, message_cache: MessageCache):
         super().__init__(message_cache)
 
+    def _add_message_to_thread_info(self, thread_info: ThreadInfo, message: Any) -> None:
+        """Add a message to a thread info
+
+        Args:
+            thread_info: Thread info object
+            message: Message object
+        """
+        message_id = str(getattr(message, "id", ""))
+
+        if message_id:
+            thread_info.messages.add(message_id)
+
     def _extract_reply_to_id(self, message: Any) -> Optional[str]:
         """Extract the reply_to_message_id from a message.
 

@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from datetime import datetime, timezone
 
 from adapters.discord_adapter.adapter.conversation.data_classes import ConversationInfo
+from adapters.discord_adapter.adapter.conversation.manager import Manager
 from adapters.discord_adapter.adapter.event_processors.history_fetcher import HistoryFetcher
 
 class TestHistoryFetcher:
@@ -28,23 +29,17 @@ class TestHistoryFetcher:
     def downloader_mock(self):
         """Create a mocked downloader"""
         downloader = AsyncMock()
-        downloader.download_attachment = AsyncMock(return_value=[])
+        downloader.download_attachment = AsyncMock()
         return downloader
 
     @pytest.fixture
-    def channel_mock(self):
-        """Create a mocked Discord channel"""
-        channel = AsyncMock()
-        return channel
-
-    @pytest.fixture
-    def conversation_info(self):
-        """Create a conversation info fixture"""
-        return ConversationInfo(
-            conversation_id="987654321/123456789",
-            conversation_type="channel",
-            conversation_name="general"
-        )
+    def conversation_manager_mock(self):
+        """Create a mocked conversation manager"""
+        manager = AsyncMock(spec=Manager)
+        manager.get_conversation = MagicMock()
+        manager.get_conversation_cache = MagicMock(return_value=[])
+        manager.add_to_conversation = AsyncMock()
+        return manager
 
     @pytest.fixture
     def mock_message_with_attachment(self):
@@ -55,14 +50,12 @@ class TestHistoryFetcher:
         message.created_at = datetime(2021, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
         message.type = discord.MessageType.default
 
-        # Create author
         author = MagicMock()
         author.id = 444555666
         author.name = "User One"
         author.display_name = "Cool User"
         message.author = author
 
-        # Create attachment
         attachment = MagicMock(spec=discord.Attachment)
         attachment.id = 987654
         attachment.filename = "test.jpg"
@@ -70,9 +63,7 @@ class TestHistoryFetcher:
         attachment.size = 12345
         message.attachments = [attachment]
 
-        # Create reference (reply)
         message.reference = None
-
         return message
 
     @pytest.fixture
@@ -84,161 +75,211 @@ class TestHistoryFetcher:
         message.created_at = datetime(2021, 1, 1, 12, 30, 0, tzinfo=timezone.utc)
         message.type = discord.MessageType.default
 
-        # Create author
         author = MagicMock()
         author.id = 777888999
         author.name = "User Two"
         author.display_name = "User 2"
         message.author = author
 
-        # No attachments
         message.attachments = []
 
-        # Create reference (reply)
         reference = MagicMock()
-        reference.message_id = 111222333  # Referring to the first message
+        reference.message_id = 111222333
         message.reference = reference
-
         return message
 
     @pytest.fixture
-    def mock_service_message(self):
-        """Create a mock Discord service message"""
-        message = MagicMock(spec=discord.Message)
-        message.id = 999888777
-        message.content = "User joined the channel"
-        message.created_at = datetime(2021, 1, 1, 11, 0, 0, tzinfo=timezone.utc)
-        message.type = discord.MessageType.new_member  # Service message type
+    def mock_attachments(self):
+        """Create mock attachment data"""
+        return [
+            {
+                "attachment_id": "987654",
+                "attachment_type": "image",
+                "file_extension": "jpg",
+                "file_path": "/path/to/image.jpg",
+                "size": 12345
+            }
+        ]
 
-        # Create author
-        author = MagicMock()
-        author.id = 444555666
-        author.name = "User One"
-        author.display_name = "Cool User"
-        message.author = author
+    @pytest.fixture
+    def mock_formatted_messages(self,
+                                mock_message_with_attachment,
+                                mock_message_reply,
+                                mock_attachments):
+        """Create mock formatted message data"""
+        return [
+            {
+                "message_id": str(mock_message_with_attachment.id),
+                "conversation_id": "987654321",
+                "sender": {
+                    "user_id": str(mock_message_with_attachment.author.id),
+                    "display_name": mock_message_with_attachment.author.display_name
+                },
+                "text": mock_message_with_attachment.content,
+                "thread_id": None,
+                "timestamp": int(mock_message_with_attachment.created_at.timestamp() * 1e3),
+                "attachments": mock_attachments
+            },
+            {
+                "message_id": str(mock_message_reply.id),
+                "conversation_id": "987654321",
+                "sender": {
+                    "user_id": str(mock_message_reply.author.id),
+                    "display_name": mock_message_reply.author.display_name
+                },
+                "text": mock_message_reply.content,
+                "thread_id": "111222333",
+                "timestamp": int(mock_message_reply.created_at.timestamp() * 1e3),
+                "attachments": []
+            }
+        ]
 
-        # No attachments
-        message.attachments = []
+    @pytest.fixture
+    def mock_cached_messages(self):
+        """Create mock cached message data"""
+        return [
+            {
+                "message_id": "111222333",
+                "conversation_id": "987654321",
+                "sender": {
+                    "user_id": "444555666",
+                    "display_name": "Cool User"
+                },
+                "text": "Message with attachment",
+                "thread_id": None,
+                "timestamp": 1609502400000,
+                "attachments": []
+            }
+        ]
 
-        # No reference
-        message.reference = None
+    @pytest.fixture
+    def channel_mock(self, mock_message_with_attachment, mock_message_reply):
+        """Create a mocked Discord channel"""
+        history = MagicMock()
+        history.return_value = MagicMock()
+        history.return_value.flatten = AsyncMock(
+            return_value=[mock_message_with_attachment, mock_message_reply]
+        )
 
-        return message
+        channel = AsyncMock()
+        channel.history = history
+
+        return channel
 
     @pytest.fixture
     def history_fetcher(self,
                         patch_config,
                         discord_client_mock,
+                        conversation_manager_mock,
+                        rate_limiter_mock,
                         downloader_mock,
-                        conversation_info,
-                        rate_limiter_mock):
+                        mock_message_with_attachment,
+                        mock_message_reply,
+                        mock_formatted_messages,
+                        mock_attachments):
         """Create a HistoryFetcher instance"""
-        history_fetcher = HistoryFetcher(
-            config=patch_config,
-            client=discord_client_mock,
-            downloader=downloader_mock,
-            conversation=conversation_info
-        )
-        history_fetcher.rate_limiter = rate_limiter_mock
-        return history_fetcher
-
-    @pytest.mark.asyncio
-    async def test_fetch(self, history_fetcher, channel_mock):
-        """Test fetching history"""
-        history_mock = MagicMock()
-        channel_mock.history.return_value = history_mock
-        history_fetcher._get_channel = AsyncMock(return_value=channel_mock)
-        history_fetcher._parse_fetched_history = AsyncMock(return_value=[])
-
-        await history_fetcher.fetch()
-
-        history_fetcher._get_channel.assert_called_once()
-        channel_mock.history.assert_called_once_with(limit=10)
-        history_fetcher._parse_fetched_history.assert_called_once_with(history_mock)
-
-    @pytest.mark.asyncio
-    async def test_parse_fetched_history(self,
-                                         history_fetcher,
-                                         mock_message_with_attachment,
-                                         mock_message_reply,
-                                         mock_service_message):
-        """Test parsing fetched history"""
-        history = [mock_message_with_attachment, mock_message_reply, mock_service_message]
-        attachment_result = [{"attachment_type": "image", "file_path": "test.jpg", "size": 23}]
-        history_fetcher.downloader.download_attachment.return_value = attachment_result
-
-        result = await history_fetcher._parse_fetched_history(history)
-        assert len(result) == 2  # Service message should be filtered out
-
-        # First message assertions
-        assert result[0]["message_id"] == "111222333"
-        assert result[0]["conversation_id"] == "987654321/123456789"
-        assert result[0]["text"] == "Message with attachment"
-        assert result[0]["sender"]["user_id"] == "444555666"
-        assert result[0]["sender"]["display_name"] == "Cool User"
-        assert result[0]["thread_id"] is None
-        assert result[0]["timestamp"] == 1609502400000  # 2021-01-01 12:00:00 in ms
-        assert result[0]["attachments"] == attachment_result
-
-        # Second message assertions
-        assert result[1]["message_id"] == "444555666"
-        assert result[1]["text"] == "This is a reply"
-        assert result[1]["sender"]["user_id"] == "777888999"
-        assert result[1]["sender"]["display_name"] == "User 2"
-        assert result[1]["thread_id"] == "111222333"  # Should be the id of the message it's replying to
-        assert result[1]["timestamp"] == 1609504200000  # 2021-01-01 12:30:00 in ms
-        assert result[1]["attachments"] == []  # No attachments
-
-    @pytest.mark.asyncio
-    async def test_parse_fetched_history_with_parallel_downloads(self, history_fetcher):
-        """Test parsing history with parallel attachment downloads"""
-        messages = []
-        for i in range(3):
-            message = MagicMock(spec=discord.Message)
-            message.id = 1000 + i
-            message.content = f"Message {i}"
-            message.created_at = datetime(2021, 1, 1, 12, i, 0, tzinfo=timezone.utc)
-            message.type = discord.MessageType.default
-
-            author = MagicMock()
-            author.id = 2000 + i
-            author.name = f"User {i}"
-            author.display_name = f"User {i}"
-            message.author = author
-
-            if i % 2 == 0:
-                attachment = MagicMock(spec=discord.Attachment)
-                attachment.id = 3000 + i
-                attachment.filename = f"file{i}.jpg"
-                message.attachments = [attachment]
+        def _create(conversation_id, anchor=None, before=None, after=None, history_limit=None):
+            if conversation_id == "987654321":
+                conversation_manager_mock.get_conversation.return_value = ConversationInfo(
+                    conversation_id="987654321",
+                    conversation_type="channel",
+                    conversation_name="general"
+                )
             else:
-                message.attachments = []
+                conversation_manager_mock.get_conversation.return_value = None
 
-            message.reference = None
-            messages.append(message)
+            fetcher = HistoryFetcher(
+                config=patch_config,
+                client=discord_client_mock,
+                conversation_manager=conversation_manager_mock,
+                conversation_id=conversation_id,
+                anchor=anchor,
+                before=before,
+                after=after,
+                history_limit=history_limit or 10
+            )
+            fetcher.downloader = downloader_mock
+            fetcher.rate_limiter = rate_limiter_mock
+            fetcher.conversation_manager.add_to_conversation.side_effect = [
+                {"added_messages": [mock_formatted_messages[0]]},
+                {"added_messages": [mock_formatted_messages[1]]}
+            ]
+            fetcher._download_attachments = AsyncMock(
+                return_value={0: mock_attachments, 1: []}
+            )
+            fetcher._make_api_request = AsyncMock(
+                return_value=[
+                    mock_message_with_attachment,
+                    mock_message_reply
+                ]
+            )
 
-        async def mock_download(message):
-            # Return a list with one attachment info dict
-            message_id = message.id
-            return [{"id": f"attachment-{message_id}", "filename": f"file-{message_id}.jpg"}]
-        history_fetcher.downloader.download_attachment.side_effect = mock_download
-
-        result = await history_fetcher._parse_fetched_history(messages)
-        assert len(result) == 3
-
-        assert result[0]["message_id"] == "1000"
-        assert result[0]["attachments"] == [{"id": "attachment-1000", "filename": "file-1000.jpg"}]
-
-        assert result[1]["message_id"] == "1001"
-        assert result[1]["attachments"] == []  # No attachments
-
-        assert result[2]["message_id"] == "1002"
-        assert result[2]["attachments"] == [{"id": "attachment-1002", "filename": "file-1002.jpg"}]
-
-        assert history_fetcher.downloader.download_attachment.call_count == 2  # Only messages 0 and 2
+            return fetcher
+        return _create
 
     @pytest.mark.asyncio
-    async def test_parse_fetched_history_empty(self, history_fetcher):
-        """Test parsing empty history"""
-        assert await history_fetcher._parse_fetched_history([]) == []
-        history_fetcher.downloader.download_attachment.assert_not_called()
+    async def test_fetch_with_anchor(self,
+                                     history_fetcher,
+                                     channel_mock,
+                                     mock_attachments):
+        """Test fetching history with an anchor"""
+        fetcher = history_fetcher("987654321", anchor="222333444")
+        history = await fetcher.fetch()
+
+        assert len(history) == 2
+        assert history[0]["message_id"] == "111222333"
+        assert history[0]["conversation_id"] == "987654321"
+        assert history[0]["sender"]["user_id"] == "444555666"
+        assert history[0]["text"] == "Message with attachment"
+        assert history[0]["attachments"] == mock_attachments
+
+        assert history[1]["message_id"] == "444555666"
+        assert history[1]["thread_id"] == "111222333"
+        assert history[1]["timestamp"] == 1609504200000
+
+    @pytest.mark.asyncio
+    async def test_fetch_with_before(self, history_fetcher):
+        """Test fetching history with before timestamp"""
+        fetcher = history_fetcher("987654321", before=1609504300000)  # After both messages
+        history = await fetcher.fetch()
+
+        fetcher.conversation_manager.get_conversation_cache.assert_called_once()
+        assert len(history) == 2  # Both messages are before the timestamp
+
+    @pytest.mark.asyncio
+    async def test_fetch_with_after(self,
+                                    history_fetcher,
+                                    channel_mock):
+        """Test fetching history with after timestamp"""
+        fetcher = history_fetcher("987654321", after=1609501000000)  # Before both messages
+        history = await fetcher.fetch()
+
+        fetcher.conversation_manager.get_conversation_cache.assert_called_once()
+        assert len(history) == 2  # Both messages are after the timestamp
+
+    @pytest.mark.asyncio
+    async def test_fetch_no_conversation(self, history_fetcher):
+        """Test fetching history with no conversation"""
+        fetcher = history_fetcher("nonexistent_id")
+        assert await fetcher.fetch() == []
+
+    def test_format_not_cached_message(self,
+                                       history_fetcher,
+                                       mock_message_with_attachment,
+                                       mock_attachments):
+        """Test formatting a message that isn't cached"""
+        fetcher = history_fetcher("987654321")
+        result = fetcher._format_not_cached_message(
+            mock_message_with_attachment, mock_attachments
+        )
+
+        assert result["message_id"] == "111222333"
+        assert result["conversation_id"] == "987654321"
+        assert result["sender"]["user_id"] == "444555666"
+        assert result["sender"]["display_name"] == "Cool User"
+        assert result["text"] == "Message with attachment"
+        assert result["thread_id"] is None
+        assert result["timestamp"] == 1609502400000
+        assert len(result["attachments"]) == 1
+        assert "created_at" not in result["attachments"][0]
+        assert "file_path" in result["attachments"][0]

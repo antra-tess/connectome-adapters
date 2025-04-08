@@ -104,17 +104,19 @@ class TestOutgoingEventProcessor:
 
             for handler_type in OutgoingEventType:
                 method_name = f"_handle_{handler_type.value}_event"
-                handler_mock = AsyncMock(return_value=True)
+                handler_mock = AsyncMock(return_value={"request_completed": True})
                 handler_mocks[handler_type] = handler_mock
                 setattr(processor, method_name, handler_mock)
 
-            assert await processor.process_event(event_type, data) is True
+            response = await processor.process_event(event_type, data)
+            assert response["request_completed"] is True
             handler_mocks[event_type].assert_called_once_with(data)
 
         @pytest.mark.asyncio
         async def test_process_unknown_event_type(self, processor):
             """Test handling an unknown event type"""
-            assert await processor.process_event("unknown_type", {}) is False
+            response = await processor.process_event("unknown_type", {})
+            assert response["request_completed"] is False
 
     class TestSendMessage:
         """Tests for the send_message method"""
@@ -122,15 +124,16 @@ class TestOutgoingEventProcessor:
         @pytest.mark.asyncio
         async def test_send_message_success(self, processor, channel_mock):
             """Test sending a simple message successfully"""
-            assert await processor._handle_send_message_event({
+            response = await processor._handle_send_message_event({
                 "conversation_id": "123456789",
                 "text": "Hello, world!"
-            }) is True
+            })
+            assert response["request_completed"] is True
 
             processor.rate_limiter.limit_request.assert_called_once_with(
                 "message", "123456789"
             )
-            channel_mock.send.assert_called_once_with(content="Hello, world!")
+            channel_mock.send.assert_called_once_with("Hello, world!")
 
         @pytest.mark.asyncio
         async def test_send_message_long_text(self, processor, channel_mock):
@@ -141,13 +144,11 @@ class TestOutgoingEventProcessor:
             }
 
             with patch.object(processor, "_split_long_message", return_value=["Part 1", "Part 2"]):
-                assert await processor._handle_send_message_event(data) is True
+                response = await processor._handle_send_message_event(data)
+                assert response["request_completed"] is True
 
             assert channel_mock.send.call_count == 2
-            channel_mock.send.assert_has_calls([
-                call(content="Part 1"),
-                call(content="Part 2")
-            ])
+            channel_mock.send.assert_has_calls([call("Part 1"), call("Part 2")])
 
         @pytest.mark.asyncio
         async def test_send_message_with_attachments(self, processor, channel_mock):
@@ -166,7 +167,8 @@ class TestOutgoingEventProcessor:
             }
 
             with patch('os.remove'):
-                assert await processor._handle_send_message_event(data) is True
+                response = await processor._handle_send_message_event(data)
+                assert response["request_completed"] is True
                 assert channel_mock.send.call_count == 2
 
                 processor.uploader.upload_attachment.assert_called_once_with(attachments)
@@ -201,7 +203,8 @@ class TestOutgoingEventProcessor:
             ]
 
             with patch('os.remove'):
-                assert await processor._handle_send_message_event(data) is True
+                response = await processor._handle_send_message_event(data)
+                assert response["request_completed"] is True
                 assert channel_mock.send.call_count == 3
                 assert uploader_mock.upload_attachment.call_count == 2
                 uploader_mock.clean_up_uploaded_files.assert_called_once_with(attachments)
@@ -215,7 +218,8 @@ class TestOutgoingEventProcessor:
             }
             processor._get_channel.side_effect = Exception("Channel not found")
 
-            assert await processor._handle_send_message_event(data) is False
+            response = await processor._handle_send_message_event(data)
+            assert response["request_completed"] is False
 
     class TestEditMessage:
         """Tests for the edit_message method"""
@@ -229,7 +233,8 @@ class TestOutgoingEventProcessor:
                 "text": "Updated text"
             }
 
-            assert await processor._handle_edit_message_event(data) is True
+            response = await processor._handle_edit_message_event(data)
+            assert response["request_completed"] is True
 
             processor.rate_limiter.limit_request.assert_called_once_with(
                 "edit_message", "123456789"
@@ -248,7 +253,8 @@ class TestOutgoingEventProcessor:
             }
             channel_mock.fetch_message.side_effect = discord.NotFound(MagicMock(), "Message not found")
 
-            assert await processor._handle_edit_message_event(data) is False
+            response = await processor._handle_edit_message_event(data)
+            assert response["request_completed"] is False
 
     class TestDeleteMessage:
         """Tests for the delete_message method"""
@@ -261,7 +267,8 @@ class TestOutgoingEventProcessor:
                 "message_id": "987654321"
             }
 
-            assert await processor._handle_delete_message_event(data) is True
+            response = await processor._handle_delete_message_event(data)
+            assert response["request_completed"] is True
             processor.rate_limiter.limit_request.assert_called_once_with(
                 "delete_message", "123456789"
             )
@@ -278,7 +285,8 @@ class TestOutgoingEventProcessor:
             }
             channel_mock.fetch_message.side_effect = discord.NotFound(MagicMock(), "Message not found")
 
-            assert await processor._handle_delete_message_event(data) is False
+            response = await processor._handle_delete_message_event(data)
+            assert response["request_completed"] is False
 
     class TestReactions:
         """Tests for the reaction-related methods"""
@@ -292,7 +300,8 @@ class TestOutgoingEventProcessor:
                 "emoji": "👍"
             }
 
-            assert await processor._handle_add_reaction_event(data) is True
+            response = await processor._handle_add_reaction_event(data)
+            assert response["request_completed"] is True
             processor.rate_limiter.limit_request.assert_called_once_with(
                 "add_reaction", "123456789"
             )
@@ -310,7 +319,8 @@ class TestOutgoingEventProcessor:
             }
             channel_mock.fetch_message.side_effect = discord.NotFound(MagicMock(), "Message not found")
 
-            assert await processor._handle_add_reaction_event(data) is False
+            response = await processor._handle_add_reaction_event(data)
+            assert response["request_completed"] is False
 
         @pytest.mark.asyncio
         async def test_remove_reaction_success(self, processor, channel_mock, discord_client_mock):
@@ -321,7 +331,8 @@ class TestOutgoingEventProcessor:
                 "emoji": "👍"
             }
 
-            assert await processor._handle_remove_reaction_event(data) is True
+            response = await processor._handle_remove_reaction_event(data)
+            assert response["request_completed"] is True
             processor.rate_limiter.limit_request.assert_called_once_with(
                 "remove_reaction", "123456789"
             )

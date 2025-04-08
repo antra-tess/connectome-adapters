@@ -100,8 +100,7 @@ class TestSocketIOToDiscordFlowIntegration:
             conversation = ConversationInfo(
                 conversation_id="987654321/123456789",
                 conversation_type="channel",
-                conversation_name="general",
-                message_count=0
+                conversation_name="general"
             )
             adapter.conversation_manager.conversations["987654321/123456789"] = conversation
             return conversation
@@ -125,7 +124,6 @@ class TestSocketIOToDiscordFlowIntegration:
                 cached_msg.reactions = reactions
 
             if conversation_id in adapter.conversation_manager.conversations:
-                adapter.conversation_manager.conversations[conversation_id].message_count += 1
                 adapter.conversation_manager.conversations[conversation_id].messages.add(message_id)
 
             return cached_msg
@@ -166,7 +164,7 @@ class TestSocketIOToDiscordFlowIntegration:
             '_get_channel',
             return_value=channel_mock
         ):
-            assert await adapter.process_outgoing_event(
+            response = await adapter.process_outgoing_event(
                 "send_message",
                 {
                     "conversation_id": "987654321/123456789",
@@ -179,7 +177,8 @@ class TestSocketIOToDiscordFlowIntegration:
                         }
                     ]
                 }
-            ) is True
+            )
+            assert response["request_completed"] is True
 
             uploader_mock.upload_attachment.assert_called_once()
             uploader_mock.clean_up_uploaded_files.assert_called_once()
@@ -202,16 +201,17 @@ class TestSocketIOToDiscordFlowIntegration:
             '_get_channel',
             return_value=channel_mock
         ):
-            assert await adapter.process_outgoing_event(
+            response = await adapter.process_outgoing_event(
                 "edit_message",
                 {
                     "conversation_id": "987654321/123456789",
                     "message_id": "111222333",
                     "text": "Edited message content"
                 }
-            ) is True
-            channel_mock.fetch_message.assert_called_once_with(111222333)
+            )
+            assert response["request_completed"] is True
 
+            channel_mock.fetch_message.assert_called_once_with(111222333)
             message = channel_mock.fetch_message.return_value
             message.edit.assert_called_once_with(content="Edited message content")
 
@@ -230,15 +230,16 @@ class TestSocketIOToDiscordFlowIntegration:
             '_get_channel',
             return_value=channel_mock
         ):
-            assert await adapter.process_outgoing_event(
+            response = await adapter.process_outgoing_event(
                 "delete_message",
                 {
                     "conversation_id": "987654321/123456789",
                     "message_id": "111222333"
                 }
-            ) is True
-            channel_mock.fetch_message.assert_called_once_with(111222333)
+            )
+            assert response["request_completed"] is True
 
+            channel_mock.fetch_message.assert_called_once_with(111222333)
             message = channel_mock.fetch_message.return_value
             message.delete.assert_called_once()
 
@@ -257,16 +258,17 @@ class TestSocketIOToDiscordFlowIntegration:
             '_get_channel',
             return_value=channel_mock
         ):
-            assert await adapter.process_outgoing_event(
+            response = await adapter.process_outgoing_event(
                 "add_reaction",
                 {
                     "conversation_id": "987654321/123456789",
                     "message_id": "111222333",
                     "emoji": "👍"
                 }
-            ) is True
-            channel_mock.fetch_message.assert_called_once_with(111222333)
+            )
+            assert response["request_completed"] is True
 
+            channel_mock.fetch_message.assert_called_once_with(111222333)
             message = channel_mock.fetch_message.return_value
             message.add_reaction.assert_called_once_with("👍")
 
@@ -285,15 +287,16 @@ class TestSocketIOToDiscordFlowIntegration:
             '_get_channel',
             return_value=channel_mock
         ):
-            assert await adapter.process_outgoing_event(
+            response = await adapter.process_outgoing_event(
                 "remove_reaction",
                 {
                     "conversation_id": "987654321/123456789",
                     "message_id": "111222333",
                     "emoji": "👍"
                 }
-            ) is True
-            channel_mock.fetch_message.assert_called_once_with(111222333)
+            )
+            assert response["request_completed"] is True
 
+            channel_mock.fetch_message.assert_called_once_with(111222333)
             message = channel_mock.fetch_message.return_value
             message.remove_reaction.assert_called_once_with("👍", adapter.client.bot.user)

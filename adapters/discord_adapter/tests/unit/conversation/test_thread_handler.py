@@ -33,7 +33,7 @@ class TestThreadHandler:
             thread_id="789",
             title=None,
             root_message_id="789",
-            message_count=1,
+            messages=set(["some_other_message_id"]),
             last_activity=datetime.now()
         )
 
@@ -131,7 +131,7 @@ class TestThreadHandler:
             assert result is not None
             assert result.thread_id == "456789"
             assert result.root_message_id == "456789"
-            assert result.message_count == 1
+            assert len(result.messages) == 1
             assert result.last_activity is not None
 
             assert "456789" in conversation_info.threads
@@ -146,7 +146,7 @@ class TestThreadHandler:
             """Test adding to an existing thread"""
             discord_message.reference.message_id = 789
             conversation_info.threads["789"] = thread_info
-            original_message_count = thread_info.message_count
+            original_message_count = len(thread_info.messages)
             original_last_activity = thread_info.last_activity
 
             await asyncio.sleep(0.01)
@@ -157,7 +157,7 @@ class TestThreadHandler:
 
             assert result is not None
             assert result.thread_id == "789"
-            assert result.message_count == original_message_count + 1
+            assert len(result.messages) == original_message_count + 1
             assert result.last_activity > original_last_activity
 
             assert "789" in conversation_info.threads
@@ -173,7 +173,7 @@ class TestThreadHandler:
             original_thread = ThreadInfo(
                 thread_id="123",
                 root_message_id="123",
-                message_count=2
+                messages=set(["456788", "456789"])
             )
             conversation_info.threads["123"] = original_thread
 
@@ -198,7 +198,7 @@ class TestThreadHandler:
             assert result is not None
             assert result.thread_id == "456789"  # Thread ID is the immediate reply target
             assert result.root_message_id == "123"  # But root ID is from the original thread
-            assert result.message_count == 1
+            assert len(result.messages) == 1
 
             assert "456789" in conversation_info.threads
             assert conversation_info.threads["456789"] == result
@@ -219,17 +219,15 @@ class TestThreadHandler:
             test_thread = ThreadInfo(
                 thread_id="test_thread",
                 root_message_id="123",
-                message_count=2
+                messages=set(["123", "124"])
             )
             conversation_info.threads["test_thread"] = test_thread
             cached_message.thread_id = "test_thread"
 
-            thread_handler.remove_thread_info(
-                conversation_info, cached_message.thread_id
-            )
+            thread_handler.remove_thread_info(conversation_info, cached_message)
 
             assert "test_thread" in conversation_info.threads
-            assert conversation_info.threads["test_thread"].message_count == 1
+            assert len(conversation_info.threads["test_thread"].messages) == 1
 
         def test_remove_last_message_from_thread(self,
                                                  thread_handler,
@@ -239,13 +237,11 @@ class TestThreadHandler:
             test_thread = ThreadInfo(
                 thread_id="test_thread",
                 root_message_id="123",
-                message_count=1
+                messages=set(["123"])
             )
             conversation_info.threads["test_thread"] = test_thread
             cached_message.thread_id = "test_thread"
 
-            thread_handler.remove_thread_info(
-                conversation_info, cached_message.thread_id
-            )
+            thread_handler.remove_thread_info(conversation_info, cached_message)
 
             assert "test_thread" not in conversation_info.threads

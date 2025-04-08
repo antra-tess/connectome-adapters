@@ -100,8 +100,7 @@ class TestDiscordToSocketIOFlowIntegration:
             conversation = ConversationInfo(
                 conversation_id="987654321/123456789",
                 conversation_type="channel",
-                conversation_name="general",
-                message_count=0
+                conversation_name="general"
             )
             adapter.conversation_manager.conversations["987654321/123456789"] = conversation
             return conversation
@@ -130,7 +129,6 @@ class TestDiscordToSocketIOFlowIntegration:
                 cached_msg.reactions = reactions
 
             if conversation_id in adapter.conversation_manager.conversations:
-                adapter.conversation_manager.conversations[conversation_id].message_count += 1
                 adapter.conversation_manager.conversations[conversation_id].messages.add(message_id)
                 if is_pinned:
                     cached_msg.is_pinned = True
@@ -283,7 +281,7 @@ class TestDiscordToSocketIOFlowIntegration:
             assert len(result[1]["data"]["attachments"]) == 1
 
             assert "987654321/123456789" in adapter.conversation_manager.conversations
-            assert adapter.conversation_manager.conversations["987654321/123456789"].message_count == 1
+            assert len(adapter.conversation_manager.conversations["987654321/123456789"].messages) == 1
 
             conversation_messages = adapter.conversation_manager.message_cache.messages.get("987654321/123456789", {})
             assert len(conversation_messages) == 1
@@ -404,7 +402,7 @@ class TestDiscordToSocketIOFlowIntegration:
 
         conversation = adapter.conversation_manager.conversations["987654321/123456789"]
         assert "111222333" not in adapter.conversation_manager.message_cache.messages.get("987654321/123456789", {})
-        assert conversation.message_count == 0
+        assert len(conversation.messages) == 0
 
     @pytest.mark.asyncio
     async def test_added_reaction_flow(self,

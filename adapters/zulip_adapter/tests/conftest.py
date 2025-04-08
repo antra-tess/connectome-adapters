@@ -24,7 +24,8 @@ def default_config_data():
             "connection_check_interval": 300,
             "max_message_length": 30,
             "chunk_size": 8192,
-            "max_history_limit": 100
+            "max_history_limit": 100,
+            "max_pagination_iterations": 1
         },
         "attachments": {
             "storage_dir": "test_attachments",

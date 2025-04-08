@@ -96,8 +96,9 @@ class IncomingEventProcessor(BaseIncomingEventProcessor):
             return await HistoryFetcher(
                 self.config,
                 self.client,
-                self.downloader,
-                self.conversation_manager.get_conversation(delta["conversation_id"])
+                self.conversation_manager,
+                delta["conversation_id"],
+                anchor="newest"
             ).fetch()
         except Exception as e:
             logging.error(f"Error fetching conversation history: {e}", exc_info=True)

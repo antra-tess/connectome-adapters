@@ -28,12 +28,12 @@ async def main():
         await socketio_server.start()
         await adapter.start()
         while adapter.running:
-            await asyncio.sleep(5)
+            await asyncio.sleep(20)
     except (ValueError, FileNotFoundError) as e:
         print(f"Configuration error: {e}")
         print("Please ensure discord_config.yaml exists with required settings")
     except Exception as e:
-        print(f"Unexpected error: {e}", exc_info=True)
+        print(f"Unexpected error: {e}")
     finally:
         if adapter.running:
             await adapter.stop()

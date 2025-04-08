@@ -22,7 +22,8 @@ def default_config_data():
             "retry_delay": 5,
             "connection_check_interval": 300,
             "max_message_length": 100,
-            "max_history_limit": 10
+            "max_history_limit": 10,
+            "max_pagination_iterations": 1
         },
         "attachments": {
             "storage_dir": "test_attachments",
@@ -41,7 +42,8 @@ def default_config_data():
             "max_messages_per_conversation": 100,
             "max_total_messages": 1000,
             "max_age_hours": 24,
-            "cache_maintenance_interval": 3600
+            "cache_maintenance_interval": 3600,
+            "cache_fetched_history": True
         },
         "logging": {
             "logging_level": "INFO",

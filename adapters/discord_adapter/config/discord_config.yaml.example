@@ -6,6 +6,7 @@ adapter:
   connection_check_interval: 300  # Seconds to check connection
   max_message_length: 1999
   max_history_limit: 100
+  max_pagination_iterations: 10
 attachments:
   storage_dir: "adapters/discord_adapter/attachments"
   max_age_days: 30
@@ -18,6 +19,7 @@ caching:
   max_total_messages: 1000
   max_age_hours: 24
   cache_maintenance_interval: 3600
+  cache_fetched_history: True
 logging:
   logging_level: "info"  # Options: DEBUG, INFO, WARNING, ERROR, CRITICAL
   log_file_path: "adapters/discord_adapter/logs/development.log"

@@ -58,8 +58,7 @@ class TestManager:
             conversation_id="987654321/123456789",
             conversation_type="channel",
             conversation_name="general",
-            messages=set(["111222333"]),
-            message_count=1
+            messages=set(["111222333"])
         )
 
     @pytest.fixture
@@ -356,7 +355,6 @@ class TestManager:
                     "987654321/123456789", "111222333"
                 )
 
-                assert conversation_info_mock.message_count == 0
                 assert delta["conversation_id"] == "987654321/123456789"
                 assert "111222333" in delta["deleted_message_ids"]
 

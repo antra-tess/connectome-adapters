@@ -37,7 +37,7 @@ class TestMessageBuilder:
         return ThreadInfo(
             thread_id="456789123",
             root_message_id="456789123",
-            message_count=3,
+            messages=set(["123456789"]),
             last_activity=datetime.now()
         )
 
