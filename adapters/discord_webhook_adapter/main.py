@@ -7,7 +7,7 @@ project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../..'))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-from adapters.discord_adapter.adapter.adapter import Adapter
+from adapters.discord_webhook_adapter.adapter.adapter import Adapter
 from core.rate_limiter.rate_limiter import RateLimiter
 from core.socket_io.server import SocketIOServer
 from core.utils.logger import setup_logging
@@ -15,14 +15,14 @@ from core.utils.config import Config
 
 async def main():
     try:
-        config = Config("adapters/discord_adapter/config/discord_config.yaml")
+        config = Config("adapters/discord_webhook_adapter/config/discord_webhook_config.yaml")
         RateLimiter.get_instance(config)
         setup_logging(config)
 
-        logging.info("Starting Discord adapter")
+        logging.info("Starting Discord Webhook adapter")
 
         socketio_server = SocketIOServer(config)
-        adapter = Adapter(config, socketio_server, start_maintenance=True)
+        adapter = Adapter(config, socketio_server)
         socketio_server.set_adapter(adapter)
 
         await socketio_server.start()
@@ -31,7 +31,7 @@ async def main():
             await asyncio.sleep(5)
     except (ValueError, FileNotFoundError) as e:
         print(f"Configuration error: {e}")
-        print("Please ensure discord_config.yaml exists with required settings")
+        print("Please ensure discord_webhook_config.yaml exists with required settings")
     except Exception as e:
         print(f"Unexpected error: {e}")
     finally:

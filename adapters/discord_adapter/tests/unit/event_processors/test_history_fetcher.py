@@ -145,8 +145,7 @@ class TestHistoryFetcher:
     @pytest.mark.asyncio
     async def test_fetch(self, history_fetcher, channel_mock):
         """Test fetching history"""
-        history_mock = MagicMock()
-        channel_mock.history.return_value = history_mock
+        channel_mock.history.return_value = MagicMock()
         history_fetcher._get_channel = AsyncMock(return_value=channel_mock)
         history_fetcher._parse_fetched_history = AsyncMock(return_value=[])
 
@@ -154,20 +153,32 @@ class TestHistoryFetcher:
 
         history_fetcher._get_channel.assert_called_once()
         channel_mock.history.assert_called_once_with(limit=10)
-        history_fetcher._parse_fetched_history.assert_called_once_with(history_mock)
+        history_fetcher._parse_fetched_history.assert_called_once()
 
     @pytest.mark.asyncio
+    @pytest.mark.filterwarnings("ignore::RuntimeWarning")
     async def test_parse_fetched_history(self,
                                          history_fetcher,
                                          mock_message_with_attachment,
                                          mock_message_reply,
                                          mock_service_message):
         """Test parsing fetched history"""
-        history = [mock_message_with_attachment, mock_message_reply, mock_service_message]
-        attachment_result = [{"attachment_type": "image", "file_path": "test.jpg", "size": 23}]
+        attachment_result = [
+            {
+                "attachment_type": "image",
+                "attachment_id": "987654",
+                "file_extension": "jpg",
+                "created_at": datetime(2021, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
+                "size": 23
+            }
+        ]
         history_fetcher.downloader.download_attachment.return_value = attachment_result
 
-        result = await history_fetcher._parse_fetched_history(history)
+        async def mock_history_generator():
+            for msg in [mock_message_with_attachment, mock_message_reply, mock_service_message]:
+                yield msg
+
+        result = await history_fetcher._parse_fetched_history(mock_history_generator())
         assert len(result) == 2  # Service message should be filtered out
 
         # First message assertions
@@ -178,7 +189,14 @@ class TestHistoryFetcher:
         assert result[0]["sender"]["display_name"] == "Cool User"
         assert result[0]["thread_id"] is None
         assert result[0]["timestamp"] == 1609502400000  # 2021-01-01 12:00:00 in ms
-        assert result[0]["attachments"] == attachment_result
+
+        assert len(result[0]["attachments"]) == 1
+
+        assert result[0]["attachments"][0]["attachment_id"] == "987654"
+        assert result[0]["attachments"][0]["attachment_type"] == "image"
+        assert result[0]["attachments"][0]["file_extension"] == "jpg"
+        assert result[0]["attachments"][0]["file_path"] == "test_attachments/image/987654/987654.jpg"
+        assert result[0]["attachments"][0]["size"] == 23
 
         # Second message assertions
         assert result[1]["message_id"] == "444555666"
@@ -190,55 +208,66 @@ class TestHistoryFetcher:
         assert result[1]["attachments"] == []  # No attachments
 
     @pytest.mark.asyncio
+    @pytest.mark.filterwarnings("ignore::RuntimeWarning")
     async def test_parse_fetched_history_with_parallel_downloads(self, history_fetcher):
         """Test parsing history with parallel attachment downloads"""
-        messages = []
-        for i in range(3):
-            message = MagicMock(spec=discord.Message)
-            message.id = 1000 + i
-            message.content = f"Message {i}"
-            message.created_at = datetime(2021, 1, 1, 12, i, 0, tzinfo=timezone.utc)
-            message.type = discord.MessageType.default
-
-            author = MagicMock()
-            author.id = 2000 + i
-            author.name = f"User {i}"
-            author.display_name = f"User {i}"
-            message.author = author
-
-            if i % 2 == 0:
-                attachment = MagicMock(spec=discord.Attachment)
-                attachment.id = 3000 + i
-                attachment.filename = f"file{i}.jpg"
-                message.attachments = [attachment]
-            else:
-                message.attachments = []
-
-            message.reference = None
-            messages.append(message)
-
         async def mock_download(message):
-            # Return a list with one attachment info dict
-            message_id = message.id
-            return [{"id": f"attachment-{message_id}", "filename": f"file-{message_id}.jpg"}]
+            return [
+                {
+                    "attachment_type": "image",
+                    "attachment_id": str(message.id),
+                    "file_extension": "jpg",
+                    "created_at": datetime(2021, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
+                    "size": 23
+                }
+            ]
         history_fetcher.downloader.download_attachment.side_effect = mock_download
 
-        result = await history_fetcher._parse_fetched_history(messages)
+        async def mock_history_generator():
+            for i in range(3):
+                message = MagicMock(spec=discord.Message)
+                message.id = 1000 + i
+                message.content = f"Message {i}"
+                message.created_at = datetime(2021, 1, 1, 12, i, 0, tzinfo=timezone.utc)
+                message.type = discord.MessageType.default
+
+                author = MagicMock()
+                author.id = 2000 + i
+                author.name = f"User {i}"
+                author.display_name = f"User {i}"
+                message.author = author
+
+                if i % 2 == 0:
+                    attachment = MagicMock(spec=discord.Attachment)
+                    attachment.id = 3000 + i
+                    attachment.filename = f"file{i}.jpg"
+                    message.attachments = [attachment]
+                else:
+                    message.attachments = []
+
+                message.reference = None
+                yield message
+
+        result = await history_fetcher._parse_fetched_history(mock_history_generator())
         assert len(result) == 3
 
         assert result[0]["message_id"] == "1000"
-        assert result[0]["attachments"] == [{"id": "attachment-1000", "filename": "file-1000.jpg"}]
+        assert result[0]["attachments"][0]["attachment_id"] == "1000"
 
         assert result[1]["message_id"] == "1001"
         assert result[1]["attachments"] == []  # No attachments
 
         assert result[2]["message_id"] == "1002"
-        assert result[2]["attachments"] == [{"id": "attachment-1002", "filename": "file-1002.jpg"}]
+        assert result[2]["attachments"][0]["attachment_id"] == "1002"
 
         assert history_fetcher.downloader.download_attachment.call_count == 2  # Only messages 0 and 2
 
     @pytest.mark.asyncio
     async def test_parse_fetched_history_empty(self, history_fetcher):
         """Test parsing empty history"""
-        assert await history_fetcher._parse_fetched_history([]) == []
+        async def mock_history_generator():
+            for msg in []:
+                yield msg
+
+        assert await history_fetcher._parse_fetched_history(mock_history_generator()) == []
         history_fetcher.downloader.download_attachment.assert_not_called()

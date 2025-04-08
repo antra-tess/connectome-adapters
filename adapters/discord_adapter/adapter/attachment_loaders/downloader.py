@@ -45,7 +45,10 @@ class Downloader():
         metadata = []
 
         for attachment in getattr(message, "attachments", []):
-            file_extension = attachment.filename.split(".")[-1].lower()
+            file_extension = ""
+            if "." in attachment.filename:
+                file_extension = attachment.filename.split(".")[-1].lower()
+
             attachment_metadata = {
                 "attachment_id": str(attachment.id),
                 "attachment_type": get_attachment_type_by_extension(file_extension),

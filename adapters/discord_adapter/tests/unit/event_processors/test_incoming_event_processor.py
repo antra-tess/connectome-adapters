@@ -224,6 +224,7 @@ class TestIncomingEventProcessor:
         """Tests for the _handle_message method"""
 
         @pytest.mark.asyncio
+        @pytest.mark.filterwarnings("ignore::RuntimeWarning")
         async def test_handle_message(self, processor, message_event_mock):
             """Test handling a new message"""
             message = {

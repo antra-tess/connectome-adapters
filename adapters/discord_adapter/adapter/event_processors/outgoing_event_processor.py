@@ -37,11 +37,14 @@ class OutgoingEventProcessor(BaseOutgoingEventProcessor):
         Returns:
             bool: True if successful, False otherwise
         """
+        message_ids = []
         channel = await self._get_channel(data["conversation_id"])
 
         for message in self._split_long_message(data["text"]):
             await self.rate_limiter.limit_request("message", data["conversation_id"])
-            await channel.send(message)
+            response = await channel.send(message)
+            if hasattr(response, "id"):
+                message_ids.append(str(response.id))
 
         attachments = data.get("attachments", [])
         attachment_limit = self.config.get_setting(
@@ -56,11 +59,13 @@ class OutgoingEventProcessor(BaseOutgoingEventProcessor):
 
             for chunk in attachment_chunks:
                 await self.rate_limiter.limit_request("message", data["conversation_id"])
-                await channel.send(files=self.uploader.upload_attachment(chunk))
+                response = await channel.send(files=self.uploader.upload_attachment(chunk))
+                if hasattr(response, "id"):
+                    message_ids.append(str(response.id))
             self.uploader.clean_up_uploaded_files(attachments)
 
         logging.info(f"Message sent to {data['conversation_id']} with {len(attachments)} attachments")
-        return True
+        return {"request_completed": True, "message_ids": message_ids}
 
     async def _edit_message(self, data: Dict[str, Any]) -> bool:
         """Edit a message
@@ -78,7 +83,7 @@ class OutgoingEventProcessor(BaseOutgoingEventProcessor):
         await message.edit(content=data["text"])
         logging.info(f"Message {data['message_id']} edited successfully")
 
-        return True
+        return {"request_completed": True}
 
     async def _delete_message(self, data: Dict[str, Any]) -> bool:
         """Delete a message
@@ -96,7 +101,7 @@ class OutgoingEventProcessor(BaseOutgoingEventProcessor):
         await message.delete()
         logging.info(f"Message {data['message_id']} deleted successfully")
 
-        return True
+        return {"request_completed": True}
 
     async def _add_reaction(self, data: Dict[str, Any]) -> bool:
         """Add a reaction to a message
@@ -114,7 +119,7 @@ class OutgoingEventProcessor(BaseOutgoingEventProcessor):
         await message.add_reaction(data["emoji"])
         logging.info(f"Reaction added to message {data['message_id']}")
 
-        return True
+        return {"request_completed": True}
 
     async def _remove_reaction(self, data: Dict[str, Any]) -> bool:
         """Remove a specific reaction from a message
@@ -132,7 +137,7 @@ class OutgoingEventProcessor(BaseOutgoingEventProcessor):
         await message.remove_reaction(data["emoji"], self.client.user)
         logging.info(f"Reaction removed from message {data['message_id']}")
 
-        return True
+        return {"request_completed": True}
 
     async def _get_channel(self, conversation_id: str) -> Optional[Any]:
         """Get a channel from a conversation_id

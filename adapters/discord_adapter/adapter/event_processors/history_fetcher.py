@@ -1,6 +1,7 @@
 import asyncio
 import discord
 import logging
+import os
 
 from typing import Any, Dict, List, Optional
 
@@ -42,8 +43,10 @@ class HistoryFetcher:
         Returns:
             List of formatted message history
         """
+        channel = await self._get_channel()
+
         return await self._parse_fetched_history(
-            await (await self._get_channel()).history(**{"limit": self.history_limit})
+            channel.history(limit=self.history_limit)
         )
 
     async def _get_channel(self) -> Optional[Any]:
@@ -73,8 +76,11 @@ class HistoryFetcher:
         formatted_history = []
         download_tasks = []
         message_map = {}  # To associate download tasks with messages
+        i = -1
 
-        for i, message in enumerate(history):
+        async for message in history:
+            i += 1
+
             if is_discord_service_message(message):
                 continue
 
@@ -110,6 +116,19 @@ class HistoryFetcher:
                     continue
 
                 formatted_history[message_map[task]]["attachments"] = result
+                for attachment in formatted_history[message_map[task]]["attachments"]:
+                    del attachment["created_at"]
+
+                    file_name = attachment["attachment_id"]
+                    if attachment["file_extension"]:
+                        file_name += "." + attachment["file_extension"]
+
+                    attachment["file_path"] = os.path.join(
+                        self.config.get_setting("attachments", "storage_dir"),
+                        attachment["attachment_type"],
+                        attachment["attachment_id"],
+                        file_name
+                    )
 
         formatted_history.sort(key=lambda msg: msg.get("timestamp", 0))
         return formatted_history
