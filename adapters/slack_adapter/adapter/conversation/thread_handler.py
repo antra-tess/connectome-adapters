@@ -6,7 +6,7 @@ from core.conversation.base_data_classes import ThreadInfo
 from core.conversation.base_thread_handler import BaseThreadHandler
 
 class ThreadHandler(BaseThreadHandler):
-    """Handles thread information for Discord messages"""
+    """Handles thread information for Slack messages"""
 
     def __init__(self, message_cache: MessageCache):
         super().__init__(message_cache)
@@ -27,7 +27,7 @@ class ThreadHandler(BaseThreadHandler):
         """Extract the reply_to_message_id from a message.
 
         Args:
-            message: Discord message object
+            message: Slack message object
 
         Returns:
             Message ID being replied to, or None if not a reply
