@@ -208,6 +208,43 @@ class BaseAdapter(ABC):
 
         return result
 
+    async def on_connectome_connected(self) -> None:
+        """Called when Connectome client connects. Syncs all active conversations.
+        
+        Sends conversation_started and history_fetched events for each conversation
+        in memory to bring the newly connected Connectome instance up to date.
+        """
+        logging.info(f"Syncing {len(self.conversation_manager.conversations)} active conversations to Connectome")
+        
+        for conv_id, conv_info in self.conversation_manager.conversations.items():
+            try:
+                # Create synthetic delta for conversation_started event
+                delta = {
+                    "conversation_id": conv_id,
+                    "conversation_name": conv_info.conversation_name,
+                    "server_name": getattr(conv_info, 'server_name', None)
+                }
+                
+                # Emit conversation_started event
+                conversation_started_event = self.incoming_events_processor.incoming_event_builder.conversation_started(delta)
+                await self.socketio_server.emit_event("bot_request", conversation_started_event)
+                
+                # Fetch conversation history
+                history = await self.incoming_events_processor._fetch_history(conv_id)
+                
+                # Emit history_fetched event
+                history_fetched_event = self.incoming_events_processor.incoming_event_builder.history_fetched(delta, history)
+                await self.socketio_server.emit_event("bot_request", history_fetched_event)
+                
+                logging.debug(f"Synced conversation {conv_id} with {len(history)} messages")
+                
+            except Exception as e:
+                logging.error(f"Error syncing conversation {conv_id}: {e}", exc_info=True)
+                # Continue with other conversations even if one fails
+                continue
+        
+        logging.info("Conversation sync completed")
+
     def _incoming_event_should_be_triggered(self,
                                             data: Any,
                                             outgoing_event_result: Dict[str, Any]) -> bool:

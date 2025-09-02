@@ -58,6 +58,13 @@ class SocketIOServer:
         async def connect(sid, environ):
             self.connected_clients.add(sid)
             logging.info(f"LLM client connected: {sid}")
+            
+            # Sync all active conversations to the newly connected client
+            if self.adapter:
+                try:
+                    await self.adapter.on_connectome_connected()
+                except Exception as e:
+                    logging.error(f"Error syncing conversations on connect: {e}", exc_info=True)
 
         @self.sio.event
         async def disconnect(sid):
