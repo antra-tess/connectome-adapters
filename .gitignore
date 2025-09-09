@@ -26,12 +26,15 @@ venv/
 ENV/
 
 # Logs
+logs/
 *.log
 *.session
+protocol_state/
 
 # Configuration with sensitive data
 *_config.yaml
 zuliprc*
+cli/adapters.toml
 
 # Cache
 .cache/

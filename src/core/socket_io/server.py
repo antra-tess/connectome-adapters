@@ -86,8 +86,8 @@ class SocketIOServer:
             self.connected_clients.add(sid)
             logging.info(f"LLM client connected: {sid}")
             
-            # Send sequence sync information
-            sync_data = await self.protocol.handle_sequence_sync(sid, {})
+            # Send initial sequence sync information
+            sync_data = await self.protocol.handle_sequence_sync("connectome", {})
             await self.sio.emit('sequence_sync', sync_data, to=sid)
             
             # Sync all active conversations to the newly connected client
@@ -105,19 +105,26 @@ class SocketIOServer:
             
         @self.sio.event
         async def sequence_sync(sid, data):
-            """Handle sequence sync from client"""
-            sync_response = await self.protocol.handle_sequence_sync(sid, data)
-            await self.sio.emit('sequence_sync', sync_response, to=sid)
+            """Handle sequence sync from client - respond with ack"""
+            # Process the sync data and get our state
+            sync_response = await self.protocol.handle_sequence_sync("connectome", data)
+            # Send acknowledgment with our state
+            await self.sio.emit('sequence_sync_ack', sync_response, to=sid)
+            
+        @self.sio.event
+        async def sequence_sync_ack(sid, data):
+            """Handle sequence sync acknowledgment from client"""
+            await self.protocol.handle_sequence_sync_ack("connectome", data)
             
         @self.sio.event  
         async def protocol_message(sid, data):
             """Handle incoming protocol messages"""
-            await self.protocol.handle_incoming_message(sid, data)
+            await self.protocol.handle_incoming_message("connectome", data)
             
         @self.sio.event
         async def resend_request(sid, data):
             """Handle retransmission requests"""
-            await self.protocol.handle_resend_request(sid, data)
+            await self.protocol.handle_resend_request("connectome", data)
 
         @self.sio.event
         async def cancel_request(sid, data):
@@ -133,7 +140,7 @@ class SocketIOServer:
             await self.protocol.send_message(
                 message_type="bot_response",
                 body=data,
-                peer_id=sid
+                peer_id="connectome"
             )
 
     def set_adapter(self, adapter: Any) -> None:
