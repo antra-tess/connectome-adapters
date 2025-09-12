@@ -9,6 +9,8 @@ from typing import Dict, Any, Optional
 
 from src.core.events.builders.request_event_builder import RequestEventBuilder
 from src.core.utils.config import Config
+from src.core.protocol.fix_protocol import FIXProtocol
+from src.core.protocol.protocol_persistence import FilePersistence, SQLitePersistence, PersistentFIXProtocol
 
 @dataclass
 class SocketIOQueuedEvent:
@@ -53,27 +55,93 @@ class SocketIOServer:
         self.is_stopping = False
         self.request_map = {}
         self.request_event_builder = RequestEventBuilder(self.adapter_type)
+        
+        # Initialize FIX protocol with persistence
+        base_protocol = FIXProtocol(
+            node_id=f"adapter-{self.adapter_type}",
+            send_callback=self._protocol_send,
+            process_callback=self._protocol_process,
+            storage_ttl=300  # Keep messages for 5 minutes
+        )
+        
+        # Choose persistence backend
+        persistence_type = self.config.get_setting("protocol", "persistence_type", "file")
+        if persistence_type == "sqlite":
+            persistence = SQLitePersistence(
+                db_path=self.config.get_setting("protocol", "db_path", "./protocol_state.db")
+            )
+        else:
+            persistence = FilePersistence(
+                base_dir=self.config.get_setting("protocol", "state_dir", "./protocol_state")
+            )
+            
+        # Wrap with persistence
+        self.protocol = PersistentFIXProtocol(base_protocol, persistence)
+        
+        # Initialize persistence in background
+        asyncio.create_task(self._init_protocol())
 
         @self.sio.event
         async def connect(sid, environ):
             self.connected_clients.add(sid)
             logging.info(f"LLM client connected: {sid}")
+            
+            # Send initial sequence sync information
+            sync_data = await self.protocol.handle_sequence_sync("connectome", {})
+            await self.sio.emit('sequence_sync', sync_data, to=sid)
+            
+            # Sync all active conversations to the newly connected client
+            if self.adapter:
+                try:
+                    await self.adapter.on_connectome_connected()
+                except Exception as e:
+                    logging.error(f"Error syncing conversations on connect: {e}", exc_info=True)
 
         @self.sio.event
         async def disconnect(sid):
             if sid in self.connected_clients:
                 self.connected_clients.remove(sid)
             logging.info(f"LLM client disconnected: {sid}.")
+            
+        @self.sio.event
+        async def sequence_sync(sid, data):
+            """Handle sequence sync from client - respond with ack"""
+            # Process the sync data and get our state
+            sync_response = await self.protocol.handle_sequence_sync("connectome", data)
+            # Send acknowledgment with our state
+            await self.sio.emit('sequence_sync_ack', sync_response, to=sid)
+            
+        @self.sio.event
+        async def sequence_sync_ack(sid, data):
+            """Handle sequence sync acknowledgment from client"""
+            await self.protocol.handle_sequence_sync_ack("connectome", data)
+            
+        @self.sio.event  
+        async def protocol_message(sid, data):
+            """Handle incoming protocol messages"""
+            await self.protocol.handle_incoming_message("connectome", data)
+            
+        @self.sio.event
+        async def resend_request(sid, data):
+            """Handle retransmission requests"""
+            await self.protocol.handle_resend_request("connectome", data)
 
         @self.sio.event
         async def cancel_request(sid, data):
             """Handle request to send a message to adapter"""
             await self._cancel_request(sid, data.get("data"))
 
+        # Keep legacy bot_response for backward compatibility during migration
         @self.sio.event
         async def bot_response(sid, data):
-            """Handle request to send a message to adapter"""
-            await self._queue_event(sid, data)
+            """Legacy handler - will be removed after migration"""
+            logging.warning(f"Received legacy bot_response from {sid} - should use protocol_message")
+            # Convert to protocol message
+            await self.protocol.send_message(
+                message_type="bot_response",
+                body=data,
+                peer_id="connectome"
+            )
 
     def set_adapter(self, adapter: Any) -> None:
         """Set the reference to the adapter instance
@@ -114,6 +182,9 @@ class SocketIOServer:
                 except asyncio.CancelledError:
                     pass
             logging.info("Event queue processor stopped")
+            
+        # Shutdown protocol
+        await self.protocol.shutdown()
 
         if self.runner:
             await self.runner.cleanup()
@@ -121,13 +192,19 @@ class SocketIOServer:
 
     async def emit_event(self, event: str, data: Dict[str, Any] = {}) -> None:
         """Emit a status event to all connected clients
+        
+        Now uses protocol for reliable delivery.
 
         Args:
             event: Event type
             data: Event data
         """
-        await self.sio.emit(event, data)
-        print(f"Emitted event: {event} with data: {data}")
+        # Use protocol to send message
+        await self.protocol.send_message(
+            message_type=event,
+            body=data
+        )
+        logging.debug(f"Emitted event via protocol: {event}")
 
     async def emit_request_queued_event(self, data: Dict[str, Any] = {}) -> None:
         """Emit a request queued event to all connected clients
@@ -319,3 +396,35 @@ class SocketIOServer:
             data["affected_message_id"] = affected_message_id
 
         return data
+
+    async def _protocol_send(self, event_type: str, data: Dict[str, Any]) -> None:
+        """Callback for protocol to send messages via Socket.IO"""
+        # Send to all connected clients
+        if self.connected_clients:
+            await self.sio.emit(event_type, data)
+        else:
+            logging.warning(f"No connected clients to send {event_type}")
+            
+    async def _protocol_process(self, message_type: str, body: Dict[str, Any]) -> None:
+        """Callback for protocol to process received messages"""
+        # Route based on message type
+        if message_type == "bot_response":
+            # Queue for processing
+            event = SocketIOQueuedEvent(
+                data=body,
+                sid="protocol",  # Placeholder since protocol handles tracking
+                timestamp=time.time()
+            )
+            await self.event_queue.put(event)
+        elif message_type == "cancel_request":
+            await self._cancel_request("protocol", body)
+        else:
+            logging.warning(f"Unknown protocol message type: {message_type}")
+
+    async def _init_protocol(self):
+        """Initialize protocol with persisted state"""
+        try:
+            await self.protocol.initialize()
+            logging.info("Protocol initialized with persisted state")
+        except Exception as e:
+            logging.error(f"Failed to initialize protocol persistence: {e}")

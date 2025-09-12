@@ -2,13 +2,13 @@
 
 # Adapters that are enabled/disabled
 [adapters]
-discord = true
+discord = false
 discord_webhook = false
 shell = false
 slack = false
 telegram = false
 text_file = false
-zulip = true
+zulip = false
 
 # Absolute path to the connectome-adapters project directory
 project_dir = "/home/user/connectome-adapters"
