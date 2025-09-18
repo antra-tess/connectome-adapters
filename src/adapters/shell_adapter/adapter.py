@@ -36,7 +36,6 @@ class Adapter():
         await self.session_manager.start()
 
         self.outgoing_events_processor = Processor(self.config, self.session_manager)
-        await self._emit_event("connect")
 
         logging.info("Adapter started successfully")
 
@@ -48,7 +47,6 @@ class Adapter():
 
         while self.running:
             await asyncio.sleep(check_interval)
-            await self._emit_event("connect")
 
     async def _emit_event(self, event_type: str) -> None:
         """Emit event
@@ -72,7 +70,6 @@ class Adapter():
         if self.monitoring_task:
             self.monitoring_task.cancel()
 
-        await self._emit_event("disconnect")
         logging.info("Adapter stopped")
 
     async def process_outgoing_event(self, data: Any) -> Dict[str, Any]:

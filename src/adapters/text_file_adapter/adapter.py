@@ -32,7 +32,6 @@ class Adapter():
         self.file_event_cache = FileEventCache(self.config, True)
         await self.file_event_cache.start()
         self.outgoing_events_processor = Processor(self.config, self.file_event_cache)
-        await self._emit_event("connect")
 
         logging.info("Adapter started successfully")
 
@@ -44,7 +43,6 @@ class Adapter():
 
         while self.running:
             await asyncio.sleep(check_interval)
-            await self._emit_event("connect")
 
     async def _emit_event(self, event_type: str) -> None:
         """Emit event
@@ -68,7 +66,6 @@ class Adapter():
         if self.file_event_cache:
             await self.file_event_cache.stop()
 
-        await self._emit_event("disconnect")
         logging.info("Adapter stopped")
 
     async def process_outgoing_event(self, data: Any) -> Dict[str, Any]:

@@ -63,13 +63,11 @@ class BaseAdapter(ABC):
                 self._setup_processors()
                 await self._perform_post_setup_tasks()
                 self._setup_monitoring()
-                await self._emit_event("connect")
 
                 logging.info("Adapter started successfully")
                 return
         except Exception as e:
             logging.error(f"Error starting adapter: {e}", exc_info=True)
-            await self._emit_event("disconnect")
 
         self.running = False
 
@@ -123,13 +121,11 @@ class BaseAdapter(ABC):
                     continue
 
                 self.current_reconnect_attempt = 0
-                await self._emit_event("connect")
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 logging.error(f"Error in connection monitor: {e}")
 
-                await self._emit_event("disconnect")
                 await asyncio.sleep(retry_delay)
 
     @abstractmethod
@@ -164,7 +160,6 @@ class BaseAdapter(ABC):
         await self._teardown_client()
         self.connected = False
 
-        await self._emit_event("disconnect")
         logging.info("Adapter stopped")
 
     @abstractmethod
