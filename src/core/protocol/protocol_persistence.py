@@ -338,10 +338,15 @@ class PersistentFIXProtocol:
     async def handle_incoming_message(self, peer_id: str, data: Dict[str, Any]) -> None:
         """Handle incoming message and update persistent state"""
         await self.protocol.handle_incoming_message(peer_id, data)
-        
+
         # Save updated state after processing
         await self.save_state()
-        
+
+    async def handle_resend_request(self, peer_id: str, data: Dict[str, Any]) -> None:
+        """Handle resend request with persistence support"""
+        # Pass persistence layer to the protocol's handler
+        await self.protocol.handle_resend_request(peer_id, data, persistence=self.persistence)
+
     # Delegate other methods to the wrapped protocol
     def __getattr__(self, name):
         return getattr(self.protocol, name) 

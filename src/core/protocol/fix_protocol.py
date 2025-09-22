@@ -10,8 +10,11 @@ import logging
 import time
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Dict, Any, Optional, Callable, List, Set
+from typing import Dict, Any, Optional, Callable, List, Set, TYPE_CHECKING
 from collections import OrderedDict
+
+if TYPE_CHECKING:
+    from .protocol_persistence import ProtocolPersistence
 
 
 class MessageDirection(Enum):
@@ -209,26 +212,46 @@ class FIXProtocol:
         except Exception as e:
             self.logger.error(f"Error handling message from {peer_id}: {e}", exc_info=True)
             
-    async def handle_resend_request(self, peer_id: str, data: Dict[str, Any]) -> None:
+    async def handle_resend_request(self, peer_id: str, data: Dict[str, Any],
+                                   persistence: Optional['ProtocolPersistence'] = None) -> None:
         """
         Handle a request to resend messages.
-        
+
         Args:
             peer_id: ID of the requesting peer
             data: Request data with from_sequence and to_sequence
+            persistence: Optional persistence layer to fetch messages from if not in memory
         """
         from_seq = data.get('from_sequence')
         to_seq = data.get('to_sequence')
-        
+
         self.logger.info(f"Resend request from {peer_id}: seq {from_seq}-{to_seq}")
-        
+
+        # First try to load missing messages from persistence if available
+        if persistence:
+            missing_sequences = [seq for seq in range(from_seq, to_seq + 1)
+                               if seq not in self.message_storage]
+
+            if missing_sequences:
+                self.logger.info(f"Loading {len(missing_sequences)} messages from persistence")
+                persisted_messages = await persistence.load_messages(
+                    self.node_id, from_seq=from_seq
+                )
+
+                # Add persisted messages to in-memory storage
+                for seq, message in persisted_messages.items():
+                    if seq >= from_seq and seq <= to_seq:
+                        self.message_storage[seq] = message
+                        self.logger.debug(f"Loaded seq={seq} from persistence")
+
+        # Now resend the requested messages
         for seq in range(from_seq, to_seq + 1):
             if seq in self.message_storage:
                 # Resend the message
                 await self.send_callback('protocol_message', self.message_storage[seq].to_dict())
                 self.logger.debug(f"Resent seq={seq} to {peer_id}")
             else:
-                self.logger.error(f"Cannot resend seq={seq} - not in storage")
+                self.logger.error(f"Cannot resend seq={seq} - not in storage or persistence")
                 
     async def handle_sequence_sync(self, peer_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
         """
