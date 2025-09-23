@@ -10,8 +10,11 @@ import logging
 import time
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Dict, Any, Optional, Callable, List, Set
+from typing import Dict, Any, Optional, Callable, List, Set, TYPE_CHECKING
 from collections import OrderedDict
+
+if TYPE_CHECKING:
+    from .protocol_persistence import ProtocolPersistence
 
 
 class MessageDirection(Enum):
@@ -209,26 +212,56 @@ class FIXProtocol:
         except Exception as e:
             self.logger.error(f"Error handling message from {peer_id}: {e}", exc_info=True)
             
-    async def handle_resend_request(self, peer_id: str, data: Dict[str, Any]) -> None:
+    async def handle_resend_request(self, peer_id: str, data: Dict[str, Any],
+                                   persistence: Optional['ProtocolPersistence'] = None) -> None:
         """
         Handle a request to resend messages.
-        
+
         Args:
             peer_id: ID of the requesting peer
             data: Request data with from_sequence and to_sequence
+            persistence: Optional persistence layer to fetch messages from if not in memory
         """
         from_seq = data.get('from_sequence')
         to_seq = data.get('to_sequence')
-        
+
         self.logger.info(f"Resend request from {peer_id}: seq {from_seq}-{to_seq}")
-        
+
+        # First try to load missing messages from persistence if available
+        if persistence:
+            missing_sequences = [seq for seq in range(from_seq, to_seq + 1)
+                               if seq not in self.message_storage]
+
+            if missing_sequences:
+                self.logger.info(f"Loading {len(missing_sequences)} messages from persistence")
+                persisted_messages = await persistence.load_messages(
+                    self.node_id, from_seq=from_seq
+                )
+
+                # Add persisted messages to in-memory storage
+                for seq, message in persisted_messages.items():
+                    if seq >= from_seq and seq <= to_seq:
+                        self.message_storage[seq] = message
+                        self.logger.debug(f"Loaded seq={seq} from persistence")
+
+        # Now resend the requested messages
+        missing_critical = []
         for seq in range(from_seq, to_seq + 1):
             if seq in self.message_storage:
                 # Resend the message
                 await self.send_callback('protocol_message', self.message_storage[seq].to_dict())
                 self.logger.debug(f"Resent seq={seq} to {peer_id}")
             else:
-                self.logger.error(f"Cannot resend seq={seq} - not in storage")
+                self.logger.error(f"Cannot resend seq={seq} - not in storage or persistence")
+                missing_critical.append(seq)
+
+        # If we couldn't resend critical messages, initiate a protocol reset
+        if missing_critical:
+            self.logger.critical(f"Failed to resend sequences {missing_critical}. Initiating protocol reset.")
+            await self.initiate_protocol_reset(
+                peer_id,
+                reason=f"Failed to resend messages {missing_critical[0]}-{missing_critical[-1]}"
+            )
                 
     async def handle_sequence_sync(self, peer_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -282,9 +315,96 @@ class FIXProtocol:
                 'to_sequence': peer_outbound,
                 'requester': self.node_id
             })
-            
-        logging.info(f"Sequence sync acknowledged by {peer_id}. They're at seq {peer_outbound}, expecting {peer_expects}")
-    
+
+        self.logger.info(f"Sequence sync acknowledged by {peer_id}. They're at seq {peer_outbound}, expecting {peer_expects}")
+
+    async def initiate_protocol_reset(self, peer_id: str, reason: str = "Manual reset") -> None:
+        """
+        Initiate a protocol reset with a specific peer.
+        This will reset all sequence counters and clear buffered messages.
+
+        Args:
+            peer_id: ID of the peer to reset with
+            reason: Reason for the reset (for logging)
+        """
+        self.logger.warning(f"Initiating protocol reset with {peer_id}. Reason: {reason}")
+
+        # Send reset request to peer
+        await self.send_callback('protocol_reset', {
+            'initiator': self.node_id,
+            'reason': reason,
+            'timestamp': time.time()
+        })
+
+        # Reset our state for this peer
+        await self._reset_peer_state(peer_id)
+
+    async def handle_protocol_reset(self, peer_id: str, data: Dict[str, Any]) -> None:
+        """
+        Handle a protocol reset request from a peer.
+
+        Args:
+            peer_id: ID of the peer requesting reset
+            data: Reset data including reason
+        """
+        reason = data.get('reason', 'Unknown')
+        initiator = data.get('initiator', peer_id)
+
+        self.logger.warning(f"Received protocol reset from {initiator}. Reason: {reason}")
+
+        # Reset our state for this peer
+        await self._reset_peer_state(peer_id)
+
+        # Send acknowledgment
+        await self.send_callback('protocol_reset_ack', {
+            'acknowledger': self.node_id,
+            'reset_complete': True,
+            'timestamp': time.time()
+        })
+
+        self.logger.info(f"Protocol reset with {peer_id} completed")
+
+    async def handle_protocol_reset_ack(self, peer_id: str, data: Dict[str, Any]) -> None:
+        """
+        Handle acknowledgment of protocol reset.
+
+        Args:
+            peer_id: ID of the acknowledging peer
+            data: Acknowledgment data
+        """
+        if data.get('reset_complete'):
+            self.logger.info(f"Protocol reset acknowledged by {peer_id}. Reset complete.")
+        else:
+            self.logger.error(f"Protocol reset not completed by {peer_id}")
+
+    async def _reset_peer_state(self, peer_id: str) -> None:
+        """
+        Reset internal state for a specific peer.
+
+        Since each FIXProtocol instance is dedicated to a single adapter/peer,
+        this resets the entire protocol state for this connection.
+
+        Args:
+            peer_id: ID of the peer to reset state for
+        """
+        # Clear peer state - this resets what we know about messages FROM the peer
+        if peer_id in self.peer_states:
+            del self.peer_states[peer_id]
+            self.logger.debug(f"Cleared peer state for {peer_id}")
+
+        # Reset outbound sequence for this protocol instance
+        # (Each adapter has its own protocol instance, so this only affects this peer)
+        old_sequence = self.outbound_sequence
+        self.outbound_sequence = 0
+
+        # Clear message storage for this protocol instance
+        # (Again, only affects this peer since each has its own instance)
+        old_count = len(self.message_storage)
+        self.message_storage.clear()
+
+        self.logger.info(f"Reset protocol state for peer {peer_id}. "
+                        f"Sequence: {old_sequence} -> 0, Cleared {old_count} stored messages")
+
     def _check_sequence_status(self, received_seq: int, last_received: int) -> SequenceStatus:
         """Check if a sequence number is valid"""
         expected = last_received + 1

@@ -44,6 +44,14 @@ class ProtocolPersistence(ABC):
         """Delete old messages that are no longer needed"""
         pass
 
+    @abstractmethod
+    async def reset_node(self, node_id: str) -> None:
+        """
+        Completely reset all persisted data for a node.
+        This includes state and all messages.
+        """
+        pass
+
 
 class FilePersistence(ProtocolPersistence):
     """Simple file-based persistence for development/small deployments"""
@@ -137,9 +145,28 @@ class FilePersistence(ProtocolPersistence):
                 
                 with open(messages_path, 'w') as f:
                     json.dump(filtered, f, indent=2)
-                    
+
         except Exception as e:
             self.logger.error(f"Failed to cleanup messages for {node_id}: {e}")
+
+    async def reset_node(self, node_id: str) -> None:
+        """Completely reset all persisted data for a node"""
+        try:
+            # Delete state file
+            state_path = self._get_state_path(node_id)
+            if os.path.exists(state_path):
+                os.remove(state_path)
+                self.logger.info(f"Deleted state file for {node_id}")
+
+            # Delete messages file
+            messages_path = self._get_messages_path(node_id)
+            if os.path.exists(messages_path):
+                os.remove(messages_path)
+                self.logger.info(f"Deleted messages file for {node_id}")
+
+            self.logger.info(f"Reset complete for node {node_id}")
+        except Exception as e:
+            self.logger.error(f"Failed to reset node {node_id}: {e}")
 
 
 class SQLitePersistence(ProtocolPersistence):
@@ -255,11 +282,26 @@ class SQLitePersistence(ProtocolPersistence):
         try:
             with sqlite3.connect(self.db_path) as conn:
                 conn.execute("""
-                    DELETE FROM protocol_messages 
+                    DELETE FROM protocol_messages
                     WHERE node_id = ? AND sequence < ?
                 """, (node_id, sequence))
         except Exception as e:
             self.logger.error(f"Failed to cleanup messages for {node_id}: {e}")
+
+    async def reset_node(self, node_id: str) -> None:
+        """Completely reset all persisted data for a node"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                # Delete state
+                conn.execute("DELETE FROM protocol_state WHERE node_id = ?", (node_id,))
+
+                # Delete all messages
+                conn.execute("DELETE FROM protocol_messages WHERE node_id = ?", (node_id,))
+
+                conn.commit()
+                self.logger.info(f"Reset complete for node {node_id} in database")
+        except Exception as e:
+            self.logger.error(f"Failed to reset node {node_id}: {e}")
 
 
 class PersistentFIXProtocol:
@@ -338,10 +380,57 @@ class PersistentFIXProtocol:
     async def handle_incoming_message(self, peer_id: str, data: Dict[str, Any]) -> None:
         """Handle incoming message and update persistent state"""
         await self.protocol.handle_incoming_message(peer_id, data)
-        
+
         # Save updated state after processing
         await self.save_state()
-        
+
+    async def handle_resend_request(self, peer_id: str, data: Dict[str, Any]) -> None:
+        """Handle resend request with persistence support"""
+        # Pass persistence layer to the protocol's handler
+        await self.protocol.handle_resend_request(peer_id, data, persistence=self.persistence)
+
+    async def initiate_protocol_reset(self, peer_id: str, reason: str = "Manual reset") -> None:
+        """
+        Initiate a protocol reset and clear persistence.
+
+        Args:
+            peer_id: ID of the peer to reset with
+            reason: Reason for the reset
+        """
+        # First initiate the reset in the protocol
+        await self.protocol.initiate_protocol_reset(peer_id, reason)
+
+        # Then clear all persisted data for this node
+        await self.persistence.reset_node(self.protocol.node_id)
+
+        # Save the reset state (zeros)
+        await self.save_state()
+
+        self.logger.info(f"Protocol reset complete with persistence cleared for {peer_id}")
+
+    async def handle_protocol_reset(self, peer_id: str, data: Dict[str, Any]) -> None:
+        """
+        Handle a protocol reset request and clear persistence.
+
+        Args:
+            peer_id: ID of the peer requesting reset
+            data: Reset data including reason
+        """
+        # Handle the reset in the protocol
+        await self.protocol.handle_protocol_reset(peer_id, data)
+
+        # Clear all persisted data for this node
+        await self.persistence.reset_node(self.protocol.node_id)
+
+        # Save the reset state (zeros)
+        await self.save_state()
+
+        self.logger.info(f"Handled protocol reset from {peer_id} with persistence cleared")
+
+    async def handle_protocol_reset_ack(self, peer_id: str, data: Dict[str, Any]) -> None:
+        """Handle protocol reset acknowledgment"""
+        await self.protocol.handle_protocol_reset_ack(peer_id, data)
+
     # Delegate other methods to the wrapped protocol
     def __getattr__(self, name):
         return getattr(self.protocol, name) 
